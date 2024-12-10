@@ -239,10 +239,10 @@ $tabPage3 = gen $tabControl "TabPage" "Explore Registry" 0 0 0 0
 
 $launch_progressBar.Value = 15
 
+
+
 # Tab 1: "Drop a file"
 
-
-# Move existing controls to tabPage1
 $labels      = @()
 $textBoxes   = @()
 $copyButtons = @()
