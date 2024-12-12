@@ -2,8 +2,7 @@
 
     REM Author : Leo Gillet - Freenitial on GitHub
 
-    cls & @echo off & title MSI Properties Viewer & setlocal
-    set "__thisBatchFile=%~f0"
+    cls & @echo off & title MSI Properties Viewer
     copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\%~n0.ps1"
     exit /b
 
