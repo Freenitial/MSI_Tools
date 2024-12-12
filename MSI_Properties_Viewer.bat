@@ -4,7 +4,7 @@
 
     cls & @echo off & title MSI Properties Viewer & setlocal
     set "__thisBatchFile=%~f0"
-    copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\%~n0.ps1"
+    copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File "%TEMP%\%~n0.ps1"
     set ec=%ERRORLEVEL%
     exit /b %ec%
 
@@ -366,13 +366,21 @@ $tabPage1.Add_DragEnter({
 
 
 $textBoxPath.Add_KeyDown({
-    $script:MSILoaded = $false
-    $pictureBoxIcon.Visible = $false
-    $labelFileName.Visible = $false
-    $labelDropMessage.Visible = $true
-    Update-ButtonPositions
+    if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
+        $findGuidButton.PerformClick()
+    } elseif ($_.Control) {
+        if ($_.Control -and $_.KeyCode -eq [System.Windows.Forms.Keys]::A) {
+            $textBoxPath.SelectAll()
+            $_.Handled = $true
+        }
+    } else {
+        $script:MSILoaded = $false
+        $pictureBoxIcon.Visible = $false
+        $labelFileName.Visible = $false
+        $labelDropMessage.Visible = $true
+        Update-ButtonPositions
+    }
 })
-
 
 
 $browseButton.Add_Click({
@@ -410,14 +418,16 @@ $findGuidButton.Add_Click({
         $i++
     }
     if ($textBoxes[0].Text -ne "") {
-        $findGuidButton.Text = "GUID FOUND"
         $findGuidButton.Enabled = $false
+        $textBoxPath.Text = $msiPath
         Update-LabelAndIcon -filePath $msiPath
+        $findGuidButton.Text = "GUID FOUND"
     } else {
-        $findGuidButton.Text = "FIND GUID"
         $findGuidButton.Enabled = $true
+        $findGuidButton.Text = "FIND GUID"
     }
 })
+
 
 $tabPage1.Add_DragDrop({
     $files = $_.Data.GetData([Windows.Forms.DataFormats]::FileDrop)
@@ -429,7 +439,6 @@ $tabPage1.Add_DragDrop({
         }
     }
 })
-
 
 
 $textBoxPath.Add_TextChanged({
@@ -447,7 +456,6 @@ $textBoxPath.Add_TextChanged({
     }
 })
 
-if ($textBoxPath.Text.Trim() -eq "") { $findGuidButton.Enabled = $false } else { $findGuidButton.Enabled = $true }
 
 
 $launch_progressBar.Value = 25
@@ -700,8 +708,8 @@ function Get-MsiInfo {
     $quotedFilePath = if ($filePath.Contains(" ")) { "`"$filePath`"" } else { $filePath }
     try {
         $msiProperties = Get-MsiProperty -Path $quotedFilePath -Properties @("ProductCode", "ProductVersion")
-        $guid = $msiProperties["ProductCode"]
-        $version = $msiProperties["ProductVersion"]
+        $guid = ($msiProperties | Where-Object { $_.Property -eq "ProductCode" }).Value
+        $version = ($msiProperties | Where-Object { $_.Property -eq "ProductVersion" }).Value
         return @{ GUID = $guid ; Version = $version }
     }
     catch {
@@ -1923,21 +1931,25 @@ function ListExport {
         return
     }
     $formatForm = New-Object System.Windows.Forms.Form
-    $formatForm.Text = "Export" ; $formatForm.Width = 350 ; $formatForm.Height = 200
+    $formatForm.Text = "Export" ; $formatForm.Width = 300 ; $formatForm.Height = 150
     $formatForm.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $formatForm.MinimizeBox = $false ; $formatForm.MaximizeBox = $false ; $formatForm.ShowIcon = $false ; $formatForm.StartPosition = "CenterScreen"
-    $label = New-Object System.Windows.Forms.Label ; $label.Text = "Choose an export format :" ; $label.AutoSize = $true ; $label.Top = 20 ; $label.Left = 20
+    $label = New-Object System.Windows.Forms.Label ; $label.Text = "Choose an export format :" ; $label.AutoSize = $true ; $label.Top = 10 ; $label.Left = 10
     $formatForm.Controls.Add($label)
-    $comboBox = New-Object System.Windows.Forms.ComboBox
-    $comboBox.Items.Add("XLSX") ; $comboBox.Items.Add("CSV")
+    $comboBox = New-Object System.Windows.Forms.ComboBox ; $comboBox.Top = 30 ; $comboBox.Left = 10 ; $comboBox.Width = 100
+    $comboBox.Items.Add("OGV Hybrid") ; $comboBox.Items.Add("XLSX") ; $comboBox.Items.Add("CSV") ; 
     $comboBox.DropDownStyle = [System.Windows.Forms.ComboBoxStyle]::DropDownList ; $comboBox.SelectedIndex = 0
-    $comboBox.Top = 50 ; $comboBox.Left = 20 ; $comboBox.Width = 100
     $formatForm.Controls.Add($comboBox)
-    $ExProgress = New-Object System.Windows.Forms.ProgressBar
-    $ExProgress.Top = 120 ; $ExProgress.Left = 20 ; $ExProgress.Width = 300 ; $ExProgress.Style = 'Continuous' ; $ExProgress.Minimum = 0 ; $ExProgress.Maximum = 100 ; $ExProgress.Value = 0 ; $ExProgress.Visible = $false
-    $formatForm.Controls.Add($ExProgress)
+    $openafterbtn = New-Object System.Windows.Forms.Checkbox ; $openafterbtn.Text = "Open after export" ; $openafterbtn.AutoSize = $true ; $openafterbtn.Top = 30 ; $openafterbtn.Left = 120
+    $formatForm.Controls.Add($openafterbtn)
     $okButton = New-Object System.Windows.Forms.Button
-    $okButton.Text = "Export" ; $okButton.Top = 90 ; $okButton.Left = 40 ; $okButton.Enabled = $true
+    $okButton.Text = "Export" ; $okButton.Top = 55 ; $okButton.Left = 10 ; $okButton.Enabled = $true
+    $formatForm.Controls.Add($okButton)
+    $cancelButton = New-Object System.Windows.Forms.Button ; $cancelButton.Text = "Cancel" ; $cancelButton.Top = 55 ; $cancelButton.Left = 85 ; $cancelButton.Add_Click({ $formatForm.Close() })
+    $formatForm.Controls.Add($cancelButton)
+    $ExProgress = New-Object System.Windows.Forms.ProgressBar
+    $ExProgress.Top = 80 ; $ExProgress.Left = 10 ; $ExProgress.Width = 260 ; $ExProgress.Style = 'Continuous' ; $ExProgress.Minimum = 0 ; $ExProgress.Maximum = 100 ; $ExProgress.Value = 0 ; $ExProgress.Visible = $false
+    $formatForm.Controls.Add($ExProgress)
     $okButton.Add_Click({
         $okButton.Enabled = $false
         $comboBox.Enabled = $false
@@ -1951,6 +1963,7 @@ function ListExport {
         $saveFileDialog = New-Object System.Windows.Forms.SaveFileDialog
         $dateTimeString = (Get-Date -Format "yyyy-MM-dd_HH-mm")
         switch ($comboBox.SelectedItem) {
+            "OGV Hybrid"  { $saveFileDialog.Filter = "Batch (*.bat)|*.bat"; $saveFileDialog.FileName = "Export_MSI_$dateTimeString.bat" }
             "XLSX" { $saveFileDialog.Filter = "Excel (*.xlsx)|*.xlsx"; $saveFileDialog.FileName = "Export_MSI_$dateTimeString.xlsx" }
             "CSV"  { $saveFileDialog.Filter = "CSV (*.csv)|*.csv"; $saveFileDialog.FileName = "Export_MSI_$dateTimeString.csv" }
         }
@@ -1964,29 +1977,56 @@ function ListExport {
         $progressStep = [int](100 / $totalSteps)
         $currentProgress = 0
         switch ($comboBox.SelectedItem) {
+            "OGV Hybrid" {
+                $headers = $columns | ForEach-Object { $_.Text }
+                $objects = New-Object System.Collections.ArrayList
+                foreach ($row in $data) {
+                    $obj = [ordered]@{}
+                    for ($i = 0; $i -lt $headers.Count; $i++) {
+                        $obj[$headers[$i]] = $row[$i]
+                    }
+                    $objects.Add([PSCustomObject]$obj) | Out-Null
+                    $currentProgress += $progressStep
+                    $ExProgress.Value = [int][math]::Min($currentProgress, 100)
+                    [System.Windows.Forms.Application]::DoEvents()
+                }
+                
+                $scriptContent = @"
+<# ::
+    cls & @echo off & title Export_MSI_$dateTimeString & setlocal
+    set "__thisBatchFile=%~f0"
+    copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\%~n0.ps1"
+    exit /b
+#>
+
+`$jsonData = @'
+$(($objects | ConvertTo-Json))
+'@
+
+`$data = ConvertFrom-Json -InputObject `$jsonData
+`$data | Select-Object '$($headers -join "','")' | Out-GridView -Title 'Export_MSI_$dateTimeString' -Wait
+"@
+                [System.IO.File]::WriteAllLines($filePath, $scriptContent, [System.Text.Encoding]::UTF8)
+            }
             "XLSX" {
                 $headers = $columns | ForEach-Object { $_.Text }
                 $dataArray = $data.ToArray()
                 Export-ToXlsx -Path $filePath -Data $dataArray -Columns $headers -ProgressBar $ExProgress
             }
             "CSV" {
-                $headers = ($columns | ForEach-Object { $_.Text }) -join ","
+                $headers = ($columns | ForEach-Object { $_.Text }) -join ";"
                 $csvLines = New-Object System.Collections.Generic.List[string]
                 $csvLines.Add($headers)
-                foreach ($row in $data) { $csvLines.Add(($row -join ",")) ; $currentProgress+=$progressStep ; $ExProgress.Value=[int][math]::Min($currentProgress, 100) ; [System.Windows.Forms.Application]::DoEvents() }
+                foreach ($row in $data) { $csvLines.Add(($row -join ";")) ; $currentProgress+=$progressStep ; $ExProgress.Value=[int][math]::Min($currentProgress, 100) ; [System.Windows.Forms.Application]::DoEvents() }
                 [System.IO.File]::WriteAllLines($filePath, $csvLines)
             }
         }
         $ExProgress.Value = 100
         [System.Windows.Forms.Application]::DoEvents()
+        if ($openafterbtn.Checked) { Start-Process -FilePath $filePath }
         $formatForm.Close()
+        Show-NonBlockingMessage -message "Export Complete" -title "Success" -timeout 2
     })
-    $formatForm.Controls.Add($okButton)
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancel"
-    $cancelButton.Top = 90 ; $cancelButton.Left = 120
-    $cancelButton.Add_Click({ $formatForm.Close() })
-    $formatForm.Controls.Add($cancelButton)
     $formatForm.ShowDialog()
 }
 
