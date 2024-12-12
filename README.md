@@ -1,7 +1,7 @@
 # **MSI Properties Viewer**
 
 
-**A powerful tool for MSI files analysis, filtering, reporting**
+**Graphical Powershell tool for MSI files analysis, filtering, reporting**
 
 
 --------------------
@@ -16,7 +16,9 @@
 - 📊 Sorting and filtering, Smart columns resize
 - 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
-- 🖥️ Remote computer analysis support (Tab 2: Compatible C$, Tab 3: Device Textbox)
+- 🖥️ Remote computer analysis support (launch .bat **as admin**)
+  - Tab Explore: "Path" textbox compatible with `\\DEVICE_NAME\C$`
+  - Tab Registry: Dedicated "Device Name" textbox
 
 --------------------
 
