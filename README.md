@@ -13,7 +13,7 @@
 - 📂 File system explorer
 - ⚙️ Customizable recursion level for MSI scan
 - 🔑 Registry explorer for installed software
-- 📊 Sorting and filtering
+- 📊 Sorting and filtering, Smart columns resize
 - 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
 - 🖥️ Remote computer analysis support
