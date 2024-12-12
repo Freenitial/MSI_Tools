@@ -4,7 +4,7 @@
 
     cls & @echo off & title MSI Properties Viewer & setlocal
     set "__thisBatchFile=%~f0"
-    copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File "%TEMP%\%~n0.ps1"
+    copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\%~n0.ps1"
     set ec=%ERRORLEVEL%
     exit /b %ec%
 
