@@ -16,7 +16,7 @@
 - 📊 Sorting and filtering, Smart columns resize
 - 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
-- 🖥️ Remote computer analysis support (launch .bat **as admin**)
+- 🖥️ Remote computer analysis support (**launch .bat as admin**)
   - Tab Folders: "Path" textbox compatible with `\\DEVICE_NAME\C$`
   - Tab Registry: Dedicated "Device Name" textbox
 
