@@ -504,7 +504,7 @@ $recursionLabel =    gen $panelLeftBottom       "Label"       "Recursion:"      
 $launch_progressBar.Value = 30
 
 $recursionComboBox.Items.AddRange(@("No", "1", "2", "3", "4", "5", "All"))
-$recursionComboBox.SelectedIndex = 0
+$recursionComboBox.SelectedIndex = 6  # default = All
 $sortComboBox.Items.AddRange(@("A-Z", "Z-A", "Old", "New"))
 $sortComboBox.SelectedIndex = 0
 
