@@ -16,7 +16,7 @@
 - 📊 Sorting and filtering, Smart columns resize
 - 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
-- 🖥️ Remote computer analysis support
+- 🖥️ Remote computer analysis support (Tab 2: Compatible C$, Tab 3: Device Textbox)
 
 --------------------
 
