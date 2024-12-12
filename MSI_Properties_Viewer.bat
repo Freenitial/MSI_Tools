@@ -220,8 +220,8 @@ function Get-MsiProperty {
 
 # Create main form
 $screenWidth = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
-$formWidth = if ($screenWidth -lt 1250) { $screenWidth } else { 1250 }
-$formHeight = if ($screenWidth -lt 600) { $screenWidth } else { 600 }
+$formWidth =  if ($screenWidth -lt 1250) { $screenWidth }  else { 1250 }
+$formHeight = if ($screenHeight -lt 600) { $screenHeight } else { 600 }
 $form = New-Object CustomForm
 $form.Text = "MSI Properties Viewer"
 $form.Size = New-Object System.Drawing.Size($formWidth, $formHeight)
