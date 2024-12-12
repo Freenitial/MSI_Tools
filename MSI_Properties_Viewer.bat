@@ -216,7 +216,8 @@ function Get-MsiProperty {
 
 
 # Create main form
-$screenWidth = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
+$screenWidth =  [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
+$screenHeight = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height
 $formWidth =  if ($screenWidth -lt 1250) { $screenWidth }  else { 1250 }
 $formHeight = if ($screenHeight -lt 600) { $screenHeight } else { 600 }
 $form = New-Object CustomForm
