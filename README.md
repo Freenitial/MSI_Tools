@@ -1,11 +1,7 @@
 # **MSI Properties Viewer**
 
-Description
-|                           ---                         |
-|                                                       |
-|   **Explore and manage MSI files**                    |
-|                                                       |
-|   A powerful tool for MSI files analysis, filtering, reporting  |
+
+**A powerful tool for MSI files analysis, filtering, reporting**
 
 
 --------------------
@@ -18,28 +14,39 @@ Description
 - ⚙️ Customizable recursion level for MSI scan
 - 🔑 Registry explorer for installed software
 - 📊 Sorting and filtering
-- 💾 Export data to CSV or XLSX
+- 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
 - 🖥️ Remote computer analysis support
 
 --------------------
 
-### Tabs Overview 📑
-
-#### Tab 1: Drop a MSI
+### Tab 1: Drop a MSI
 - Drag & drop or browse for MSI files
 - Extract essential properties (GUID, Name, Version...)
 - Quick copy functionality for each field
 
-#### Tab 2: Explore Folders
+![Tab1](https://github.com/user-attachments/assets/5b9ca6c9-ace4-499e-8424-939e731ce638)
+
+--------------------
+
+### Tab 2: Explore Folders
 - Browse file system with a tree view
 - Recursive search for MSI, MST, MSP files
 - Filtering and sorting options
 - Right-click menu with multiple actions
 - Scan with progressbar tracking
 
-#### Tab 3: Explore Registry
+![Tab2](https://github.com/user-attachments/assets/ce8f4ec0-f242-4d89-b584-45956151ab1a)
+
+
+--------------------
+
+### Tab 3: Explore Registry
 - View installed software from registry
 - Remote registry capable
 - Filtering and sorting options
 - Right-click menu with multiple actions
+
+![Tab3](https://github.com/user-attachments/assets/1961f0f9-755d-471a-b650-3bc0e2046029)
+
+--------------------
