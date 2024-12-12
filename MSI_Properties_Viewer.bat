@@ -97,7 +97,7 @@ public class NativeMethods
 $highlightBrush = [System.Drawing.SolidBrush]::new([System.Drawing.SystemColors]::Highlight)
 $highlightTextBrush = [System.Drawing.SolidBrush]::new([System.Drawing.SystemColors]::HighlightText)
 
-# Define the gen function
+# Function that quick-create majority of controls
 function gen {
     param(
         [Parameter(Mandatory = $true)] $container,
@@ -168,8 +168,6 @@ function gen {
 }
 
 
-
-# Function to get MSI properties
 function Get-MsiProperty {
     [CmdletBinding()]
     param (
@@ -217,7 +215,6 @@ function Get-MsiProperty {
 }
 
 
-
 # Create main form
 $screenWidth = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width
 $formWidth =  if ($screenWidth -lt 1250) { $screenWidth }  else { 1250 }
@@ -238,13 +235,11 @@ $tabPage3 = gen $tabControl "TabPage" "Explore Registry" 0 0 0 0
 $launch_progressBar.Value = 15
 
 
-
 # Tab 1: "Drop a file"
 
 $labels      = @()
 $textBoxes   = @()
 $copyButtons = @()
-
 $properties = [ordered]@{
     "GUID"             = "ProductCode"
     "Product Name"     = "ProductName"
@@ -252,6 +247,7 @@ $properties = [ordered]@{
     "Manufacturer"     = "Manufacturer"
     "Upgrade Code"     = "UpgradeCode"
 }
+
 
 $yPos = 35
 foreach ($key in $properties.Keys) {
@@ -268,6 +264,7 @@ foreach ($key in $properties.Keys) {
     $yPos += 30
 }
 
+
 $borderTop =        gen $tabPage1 "Panel" "" 0 0 0 1   'Dock=Top'    'BackColor=Gray' 
 $separatorLine =    gen $tabPage1 "Panel" "" 0 ($yPos + 30) $tabPage1.ClientSize.Width 1 'BorderStyle=None' 'BackColor=Gray' 'AutoSize=$true'
 $labelMsiPath =     gen $tabPage1 "Label" "MSI Path:" 10 $yPos 0 0 'AutoSize=$true' 
@@ -279,10 +276,10 @@ $browseButton   =   gen $tabPage1 "Button" "BROWSE" 0 0 85 25
 $pictureBoxIcon  =  gen $tabPage1 "PictureBox" "" 0 0 32 32 'SizeMode=StretchImage' 'Visible=$false'
 $labelFileName   =  gen $tabPage1 "Label" "" 0 0 0 0 'AutoSize=$true' 'Font=Arial,20' 'Visible=$false'
 
+
 # Load a generic MSI icon from msiexec.exe
 $iconMsi = [System.Drawing.Icon]::ExtractAssociatedIcon((Join-Path $env:windir "System32\msiexec.exe"))
 $pictureBoxIcon.Image = $iconMsi.ToBitmap()
-
 
 
 function MeasureTextWidth {
@@ -295,6 +292,7 @@ function MeasureTextWidth {
     return [int]$sizeF.Width
 }
 
+
 function Update-LabelAndIcon {
     param ([string]$filePath)
     $script:MSILoaded = $true
@@ -304,6 +302,7 @@ function Update-LabelAndIcon {
     $labelFileName.Visible = $true
     Update-ButtonPositions | Out-Null
 }
+
 
 function Update-ButtonPositions {
     $formWidth  = [int]$tabPage1.ClientSize.Width
@@ -349,9 +348,12 @@ function Update-ButtonPositions {
     }
 }
 
+
 $tabPage1.Add_Resize({ Update-ButtonPositions })
 
+
 $launch_progressBar.Value = 20
+
 
 $tabPage1.AllowDrop = $true
 $tabPage1.Add_DragEnter({
@@ -455,10 +457,7 @@ $textBoxPath.Add_TextChanged({
 })
 
 
-
 $launch_progressBar.Value = 25
-
-
 
 
 # Tab 2
@@ -471,7 +470,6 @@ $splitContainer2.Orientation = [System.Windows.Forms.Orientation]::Vertical
 $splitContainer2.Panel1MinSize = 100
 $splitContainer2.Panel2MinSize = 100
 $tabPage2.Controls.Add($splitContainer2)
-
 
 
 # Panels for the left side
@@ -506,8 +504,8 @@ $recursionComboBox.Items.AddRange(@("No", "1", "2", "3", "4", "5", "All"))
 $recursionComboBox.SelectedIndex = 6  # default = All
 $sortComboBox.Items.AddRange(@("A-Z", "Z-A", "Old", "New"))
 $sortComboBox.SelectedIndex = 0
-
 $sortComboBox.Add_SelectedIndexChanged({ refreshTreeViewFolder })
+
 
 $pathTextBox.Add_KeyDown({
     if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
@@ -517,7 +515,6 @@ $pathTextBox.Add_KeyDown({
         $_.Handled = $true
     }
 })
-
 
 
 # Panels for the right side
@@ -540,6 +537,7 @@ Function Update-ProgressBarWidth {
     $progressBar.Width = $availableWidth
 }
 
+
 $statusStrip = New-Object System.Windows.Forms.StatusStrip
 $statusStrip.SizingGrip = $false
 $statusLabel = New-Object System.Windows.Forms.ToolStripStatusLabel
@@ -561,9 +559,8 @@ $progressPanel.Controls.Add($statusStrip)
 $sep6 = gen $progressPanel "Panel" "" 0 0 1 0 'Dock=Left' 'BackColor=Gray'
 
 
-
-
 $allListViewItemsExplore = New-Object System.Collections.ArrayList
+
 
 $columns_listView_Explore = @("File Name", "GUID", "Version", "Path", "Weight", "Modified")
 foreach ($col in $columns_listView_Explore) {
@@ -571,6 +568,7 @@ foreach ($col in $columns_listView_Explore) {
     $columnHeader.Text = $col
     [void]$listView_Explore.Columns.Add($columnHeader)
 }
+
 
 $searchTextBox.Add_KeyDown({ if ($_.Control -and $_.KeyCode -eq [System.Windows.Forms.Keys]::A) { $searchTextBox.SelectAll() ; $_.Handled = $true } })
 
@@ -646,7 +644,6 @@ $showMspCheckbox.Add_CheckedChanged({ FilterListViewItems -Mode Explore -listVie
 $showMstCheckbox.Add_CheckedChanged({ FilterListViewItems -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore })
 
 
-
 function AdjustListViewColumns {
     param([System.Windows.Forms.ListView]$listView)
     $SearchCheckedBtn.Width = ($splitContainer2.Panel1.Width - $recursionLabel.Width - $recursionComboBox.Width) / 2
@@ -696,7 +693,6 @@ function AdjustListViewColumns {
 }
 
 
-
 function Get-MsiInfo {
     param ([string]$filePath)
     $defaultInfo = @{ GUID="None" ; Version="None" }
@@ -717,9 +713,7 @@ function Get-MsiInfo {
 }
 
 
-
 $launch_progressBar.Value = 40
-
 
 
 # Initialize the TreeView
@@ -738,6 +732,7 @@ $treeView.Nodes.Add($fastAccessNode) | Out-Null
 $shell = New-Object -ComObject Shell.Application
 $quickAccess = $shell.Namespace('shell:::{679f85CB-0220-4080-B29B-5540CC05AAB6}')
 $quickAccessItems = $quickAccess.Items()
+
 
 foreach ($item in $quickAccessItems) {
     if ($item.IsFolder) {
@@ -761,7 +756,6 @@ foreach ($drive in $drives) {
 $rootNode.Expand()
 
 
-
 $launch_progressBar.Value = 45
 
 
@@ -779,7 +773,7 @@ function SortDirectories {
     return $dirs
 }
 
-# Function to populate the TreeView
+
 function PopulateTree {
     param ([System.Windows.Forms.TreeNode]$parentNode, [string]$path)
     try {
@@ -841,6 +835,7 @@ function PopulateTree {
         Write-Warning "Error accessing path ${path}: $_"
     }
 }
+
 
 function Expand-TreeViewPath {
     param([System.Windows.Forms.TreeView]$treeView, [string]$path)
@@ -1025,8 +1020,6 @@ function OpenTreeViewSelectedFolder {
 $openBtn.Add_Click({ param($s, $e) ; OpenTreeViewSelectedFolder })
 
 
-
-
 function refreshTreeViewFolder {
     $selectedNode = $treeView.SelectedNode
     if ($null -ne $selectedNode) {
@@ -1051,9 +1044,7 @@ function refreshTreeViewFolder {
 }
 
 
-
 $refreshBtn.Add_Click({ refreshTreeViewFolder })
-
 
 
 $launch_progressBar.Value = 55
@@ -1143,9 +1134,9 @@ function Update-ProgressBar {
 }
 
 
-
 # Convert ComboBox selection to depth
 function Get-RecursionDepth { switch ($recursionComboBox.SelectedItem) { "No" { return 1 } ; "All" { return [int]::MaxValue } ; default { return [int]$recursionComboBox.SelectedItem + 1 } } }
+
 
 $treeView.Add_BeforeExpand({ 
     $node = $_.Node
@@ -1159,6 +1150,7 @@ $treeView.Add_BeforeExpand({
 })
 #$treeView.Add_AfterCheck({ param($s, $e) ; $node = $e.Node ; foreach ($child in $node.Nodes) { $child.Checked = $node.Checked } })
 
+
 function Get-CheckedNodes {
     param([System.Windows.Forms.TreeNodeCollection]$nodes)
     foreach ($node in $nodes) {
@@ -1167,7 +1159,9 @@ function Get-CheckedNodes {
     }
 }
 
+
 $launch_progressBar.Value = 60
+
 
 function Complete-Listview {
     param([bool]$multiSearch = $false)
@@ -1253,11 +1247,8 @@ function Complete-Listview {
 }
 
 
-
-
 $SearchCheckedBtn.Add_Click({ Complete-Listview -multiSearch $true })
 $SearchMSIBtn.Add_Click({ Complete-Listview -multiSearch $false })
-
 
 
 $gotoButton.Add_Click({
@@ -1269,7 +1260,6 @@ $gotoButton.Add_Click({
 })
 
 
-# Search TextBox event
 $searchTextBox.Add_TextChanged({
     $filter = $searchTextBox.Text.ToLower()
     $listView_Explore.BeginUpdate()
@@ -1304,7 +1294,6 @@ $searchTextBox.Add_TextChanged({
     Update-ProgressBarWidth
     $listView_Explore.EndUpdate()
 })
-
 
 
 $stopButton.Add_Click({ $script:stopRequested = $true })
@@ -1417,13 +1406,10 @@ function ConfigureTreeViewContextMenu($treeView) {
     })
     $contextMenu.Items.Add($cmdAdminHereMenuItem) | Out-Null
 }
-
 ConfigureTreeViewContextMenu -treeView $treeView
 
 
-
 $launch_progressBar.Value = 70
-
 
 
 # Tab 3: Explore Registry
@@ -1451,6 +1437,7 @@ $sep4_panelCtrls_Registry = gen $panelCtrls_Registry    "Panel"    ""       0 0 
 $subPanelCtrls_HKCU       = gen $panelCtrls_Registry    "Panel"    ""       0 0 450 40 'Dock=Left'
 $subPanelCtrls_HKCU_line1 = gen $subPanelCtrls_HKCU     "Panel"    ""       0 0 0 20   'Dock=Top'
 $subPanelCtrls_HKCU_line2 = gen $subPanelCtrls_HKCU     "Panel"    ""       0 0 0 20   'Dock=Bottom'
+
 $sep3_panelCtrls_Registry = gen $panelCtrls_Registry    "Panel"    ""       0 0 25 0   'Dock=Left'
 $sep2_panelCtrls_Registry = gen $panelCtrls_Registry    "Panel"    ""       0 0 1 0    'Dock=Left' 'BackColor=Gray'
 $sep1_panelCtrls_Registry = gen $panelCtrls_Registry    "Panel"    ""       0 0 25 0   'Dock=Left'
@@ -1471,15 +1458,17 @@ $checkbox_HKCU64          = gen $subPanelCtrls_HKCU_line1  "CheckBox" "HKCU\Soft
 
 $searchTextBox_Registry   = gen $subPanelCtrls_Filter "TextBox"  ""                   0 0 0 20 'Dock=Fill' 
 $refreshButton_Registry   = gen $subPanelCtrls_Filter "Button"   "Refresh"            0 0 55 0 'Dock=Right'
-$FilterLabel_Registry       = gen $subPanelCtrls_Filter "Label"    "Filter:"            0 0 0 0  'Dock=Left'   'Autosize=$true'
+$FilterLabel_Registry     = gen $subPanelCtrls_Filter "Label"    "Filter:"            0 0 0 0  'Dock=Left'   'Autosize=$true'
 
 $columnsRegistry = @("DisplayName", "GUID", "InstallSource", "UninstallString", "InstallDate", "DisplayVersion", "Registry Path")
 $allListViewItems_Registry = New-Object System.Collections.ArrayList
+
 
 foreach ($btn in @($HKLM32_btn, $HKLM64_btn, $HKCU32_btn, $HKCU64_btn)) {
     $btn.FlatStyle = [System.Windows.Forms.FlatStyle]::Flat
     $btn.FlatAppearance.BorderSize = 1
 }
+
 
 $LoadReg_textbox.Add_KeyDown({
     if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
@@ -1490,6 +1479,7 @@ $LoadReg_textbox.Add_KeyDown({
     }
 })
 
+
 $searchTextBox_Registry.Add_KeyDown({
     if ($_.KeyCode -eq [System.Windows.Forms.Keys]::Enter) {
         $refreshButton_Registry.PerformClick()
@@ -1499,7 +1489,9 @@ $searchTextBox_Registry.Add_KeyDown({
     }
 })
 
+
 $launch_progressBar.Value = 75
+
 
 Function Initialize-RegistryListView {
     param( [System.Windows.Forms.ListView]$listViewparam )
@@ -1579,8 +1571,6 @@ Function PopulateRegistryListView {
 }
 
 
-
-
 Function Open-RegeditHere {
     param([System.Windows.Forms.ListView]$listViewparam, [string]$defaultPath, [bool]$parent=$false)
     $selectedItems = $listViewparam.SelectedItems
@@ -1624,20 +1614,22 @@ function Update-RegistryListView {
     }
 }
 
+
 $checkbox_HKCU64.Add_CheckedChanged({ Update-RegistryListView})
 $checkbox_HKCU32.Add_CheckedChanged({ Update-RegistryListView})
 $checkbox_HKLM64.Add_CheckedChanged({ Update-RegistryListView})
 $checkbox_HKLM32.Add_CheckedChanged({ Update-RegistryListView})
+
 
 $HKLM32_btn.Add_Click({ Open-RegeditHere -listViewparam $listView_Registry -defaultPath $checkbox_HKLM32.Text -parent $true })
 $HKLM64_btn.Add_Click({ Open-RegeditHere -listViewparam $listView_Registry -defaultPath $checkbox_HKLM64.Text -parent $true })
 $HKCU32_btn.Add_Click({ Open-RegeditHere -listViewparam $listView_Registry -defaultPath $checkbox_HKCU32.Text -parent $true })
 $HKCU64_btn.Add_Click({ Open-RegeditHere -listViewparam $listView_Registry -defaultPath $checkbox_HKCU64.Text -parent $true })
 
+
 $refreshButton_Registry.Add_Click({ Update-RegistryListView -refresh $true})
 
 
-# Function to Add Search Functionality
 Function Add-SearchFunctionality {
     param ([System.Windows.Forms.TextBox]$searchTextBox, [System.Windows.Forms.ListView]$listViewparam, [System.Collections.ArrayList]$allListViewItems)
     $eventHandler = {  # Capture local variables with closure
@@ -1651,6 +1643,8 @@ Function Add-SearchFunctionality {
     $searchTextBox.add_TextChanged($eventHandler)
 }
 Add-SearchFunctionality -searchTextBox $searchTextBox_Registry -listViewparam $listView_Registry -allListViewItems $allListViewItems_Registry
+
+
 Function HandleColumnClick {
     param ([System.Windows.Forms.ListView]$listViewparam, [System.Windows.Forms.ColumnClickEventArgs]$e)
     if ($e.Column -eq $script:sortColumn) {
@@ -1663,7 +1657,6 @@ Function HandleColumnClick {
     $listViewparam.Sort()
 }
 $listView_Registry.Add_ColumnClick({ HandleColumnClick -listViewparam $listView_Registry -e $_ })
-
 
 
 function ConfigureListViewContextMenu($listView) {
@@ -1980,15 +1973,12 @@ function ListExport {
                 $objects = New-Object System.Collections.ArrayList
                 foreach ($row in $data) {
                     $obj = [ordered]@{}
-                    for ($i = 0; $i -lt $headers.Count; $i++) {
-                        $obj[$headers[$i]] = $row[$i]
-                    }
+                    for ($i = 0; $i -lt $headers.Count; $i++) { $obj[$headers[$i]] = $row[$i] }
                     $objects.Add([PSCustomObject]$obj) | Out-Null
                     $currentProgress += $progressStep
                     $ExProgress.Value = [int][math]::Min($currentProgress, 100)
                     [System.Windows.Forms.Application]::DoEvents()
                 }
-                
                 $scriptContent = @"
 <# ::
     cls & @echo off & title Export_MSI_$dateTimeString
@@ -2026,7 +2016,6 @@ $(($objects | ConvertTo-Json))
     })
     $formatForm.ShowDialog()
 }
-
 
 
 function Export-ToXlsx {
@@ -2102,6 +2091,7 @@ function Export-ToXlsx {
 
 $launch_progressBar.Value = 90
 
+
 ConfigureListViewContextMenu -listView $listView_Explore
 ConfigureListViewContextMenu -listView $listView_Registry
 
@@ -2125,8 +2115,6 @@ $form.add_OnWindowMessage({
         0x0005 { if (-not $script:resizePending) { & $processAction } }
     }
 })
-
-
 
 
 $tabControl.Add_SelectedIndexChanged({
@@ -2164,8 +2152,8 @@ $form.Add_Load({
     $form.MinimumSize        = New-Object System.Drawing.Size(600, 400)
 })
 
-$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 
+$form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 
 
 $form.Add_Shown({
