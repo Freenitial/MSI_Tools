@@ -1991,8 +1991,7 @@ function ListExport {
                 
                 $scriptContent = @"
 <# ::
-    cls & @echo off & title Export_MSI_$dateTimeString & setlocal
-    set "__thisBatchFile=%~f0"
+    cls & @echo off & title Export_MSI_$dateTimeString
     copy /y "%~f0" "%TEMP%\%~n0.ps1" >NUL && powershell -Nologo -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%TEMP%\%~n0.ps1"
     exit /b
 #>
