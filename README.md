@@ -17,7 +17,7 @@
 - 💾 Export data to CSV, XLS, or Self-launching OGV (hybrid batch)
 - 🎯 Multi-selection support
 - 🖥️ Remote computer analysis support (launch .bat **as admin**)
-  - Tab Explore: "Path" textbox compatible with `\\DEVICE_NAME\C$`
+  - Tab Folders: "Path" textbox compatible with `\\DEVICE_NAME\C$`
   - Tab Registry: Dedicated "Device Name" textbox
 
 --------------------
