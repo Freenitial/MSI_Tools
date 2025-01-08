@@ -611,8 +611,8 @@ function FilterListViewItems {
             } 
             foreach ($item in $allListViewItems) {
                 $listview_Name = $item.SubItems[$listview_NameIndex].Text.ToLower()
-                $isMsp = $listview_Name.EndsWith(".msp")
-                $isMst = $listview_Name.EndsWith(".mst")
+                $isMsp = $listview_Name.EndsWith(".msp", [System.StringComparison]::OrdinalIgnoreCase)
+                $isMst = $listview_Name.EndsWith(".mst", [System.StringComparison]::OrdinalIgnoreCase)
                 if (($showMsp -or -not $isMsp) -and ($showMst -or -not $isMst)) { $visibleItems += $item.Clone() }
             }
         }
@@ -697,12 +697,11 @@ function AdjustListViewColumns {
 function Get-MsiInfo {
     param ([string]$filePath)
     $defaultInfo = @{ GUID="None" ; Version="None" }
-    if (-not $filePath.EndsWith(".msi") -or -not (Test-Path $filePath)) { 
-        return $defaultInfo 
+    if (-not $filePath.EndsWith(".msi", [System.StringComparison]::OrdinalIgnoreCase) -or -not (Test-Path $filePath)) {
+         return $defaultInfo 
     }
-    $quotedFilePath = if ($filePath.Contains(" ")) { "`"$filePath`"" } else { $filePath }
     try {
-        $msiProperties = Get-MsiProperty -Path $quotedFilePath -Properties @("ProductCode", "ProductVersion")
+        $msiProperties = Get-MsiProperty -Path $filePath -Properties @("ProductCode", "ProductVersion")
         $guid = ($msiProperties | Where-Object { $_.Property -eq "ProductCode" }).Value
         $version = ($msiProperties | Where-Object { $_.Property -eq "ProductVersion" }).Value
         return @{ GUID = $guid ; Version = $version }
@@ -1201,7 +1200,7 @@ function Complete-Listview {
     $stopButton.Enabled = $true
     [System.Windows.Forms.Application]::DoEvents()
     $pathsArray = $finalPathsToSearch.ToArray()
-    $items = Get-FilesRecursive -paths $pathsArray  -depth $recursionDepth -allItems $allItemsRef -progressBar $progressBar
+    $items = Get-FilesRecursive -paths $pathsArray -depth $recursionDepth -allItems $allItemsRef -progressBar $progressBar
     $allFiles = $allItems | Where-Object { -not $_.PSIsContainer }
     if ($allFiles.Count -gt 0) {
         $totalFiles = $allFiles.Count
@@ -1284,8 +1283,8 @@ $searchTextBox.Add_TextChanged({
             }
             if ($listview_NameIndex -ge 0) {
                 $listview_Name = $item.SubItems[$listview_NameIndex].Text.ToLower()
-                $isMsp = $listview_Name.EndsWith(".msp")
-                $isMst = $listview_Name.EndsWith(".mst")
+                $isMsp = $listview_Name.EndsWith(".msp", [System.StringComparison]::OrdinalIgnoreCase)
+                $isMst = $listview_Name.EndsWith(".mst", [System.StringComparison]::OrdinalIgnoreCase)
                 if (($showMspCheckbox.Checked -or -not $isMsp) -and ($showMstCheckbox.Checked -or -not $isMst)) { $visibleItems += $item.Clone() }
             }
         }
