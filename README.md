@@ -1,4 +1,4 @@
-# **MSI Properties Viewer**
+# **MSI Tools**
 
 
 **Graphical Powershell tool for MSI files analysis, filtering, reporting**
