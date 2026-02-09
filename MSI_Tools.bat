@@ -479,6 +479,14 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using System.Runtime.InteropServices;
+public class DoubleBufferedPanel : Panel
+{
+    public DoubleBufferedPanel()
+    {
+        this.DoubleBuffered = true;
+        this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+    }
+}
 public class Win11TitleBar : Panel
 {
     [DllImport("user32.dll")]
@@ -744,12 +752,11 @@ $script:notchTopWidth    = 96
 $script:notchBottomWidth = 64
 $script:notchHeight      = 21
 $notchInset = [int](($script:notchTopWidth - $script:notchBottomWidth) / 2)
-$btnAbout = New-Object System.Windows.Forms.Panel
+$btnAbout           = New-Object DoubleBufferedPanel
 $btnAbout.Size      = [System.Drawing.Size]::new($script:notchTopWidth, $script:notchHeight)
 $btnAbout.Location  = [System.Drawing.Point]::new([int](($form.ClientSize.Width - $script:notchTopWidth) / 2), 0)
 $btnAbout.BackColor = [System.Drawing.Color]::FromArgb(228, 228, 228)
 $btnAbout.Cursor    = [System.Windows.Forms.Cursors]::Hand
-$btnAbout.SetStyle([System.Windows.Forms.ControlStyles]::AllPaintingInWmPaint -bor [System.Windows.Forms.ControlStyles]::UserPaint -bor [System.Windows.Forms.ControlStyles]::OptimizedDoubleBuffer, $true)
 # Trapezoid clipping region (wide at top, narrow at bottom)
 $notchPath = [System.Drawing.Drawing2D.GraphicsPath]::new()
 $notchPath.AddPolygon(@(
