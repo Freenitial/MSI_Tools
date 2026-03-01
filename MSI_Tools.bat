@@ -7907,8 +7907,8 @@ function Rebuild-UninstallPanelsForComputer {
     function Get-DefaultCustomCommand {
         param([string]$UninstallString, [string]$QuietUninstallString, [string]$ModifyPath, [string]$ProductCode, [string]$DisplayName)
         $sourceCommand = $null
-        if (![string]::IsNullOrWhiteSpace($UninstallString))          { $sourceCommand = $UninstallString }
-        elseif (![string]::IsNullOrWhiteSpace($QuietUninstallString)) { $sourceCommand = $QuietUninstallString }
+        if (![string]::IsNullOrWhiteSpace($QuietUninstallString))     { $sourceCommand = $QuietUninstallString }
+        elseif (![string]::IsNullOrWhiteSpace($UninstallString))      { $sourceCommand = $UninstallString }
         elseif (![string]::IsNullOrWhiteSpace($ModifyPath))           { $sourceCommand = $ModifyPath }
         if ([string]::IsNullOrWhiteSpace($sourceCommand))             { return "" }
         if ($sourceCommand -match '^msiexec') {
@@ -8095,6 +8095,7 @@ function Rebuild-UninstallPanelsForComputer {
         $productTLP.Tag = @{
             Entry           = $entry
             IsChild         = $isChild
+            IsPriority      = $isPriority
             State           = 'Exists'
             JobId           = $null
             ProductCode     = $ProductCode
@@ -9093,6 +9094,28 @@ function Update-UninstallPanelComplete {
                         $tag = $this.Tag
                         Open-LogFile -LogPath $tag.LogPath -ComputerName $tag.Computer
                     })
+                }
+            }
+        }
+    }
+    # Re-check child panels when a recommended (priority) entry completes uninstall
+    if ($ProductPanel.Tag.IsPriority -and $newState -ne 'Exists') {
+        $childPanelKeys = @($script:UninstallPanelControls.Keys | Where-Object {
+            $ci = $script:UninstallPanelControls[$_]
+            $ci.Panel.Tag.IsChild -and $ci.Panel.Tag.Computer -eq $ComputerName -and $ci.Panel.Tag.State -eq 'Exists'
+        })
+        if ($childPanelKeys.Count -gt 0) {
+            $childRegPaths   = @($childPanelKeys | ForEach-Object { $script:UninstallPanelControls[$_].Panel.Tag.Entry.RegistryPath } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+            $childRegResults = Test-RegistryPathsBatch -Paths $childRegPaths -ComputerName $ComputerName
+            foreach ($cpk in $childPanelKeys) {
+                $childInfo     = $script:UninstallPanelControls[$cpk]
+                $childRegPath  = $childInfo.Panel.Tag.Entry.RegistryPath
+                $childRegExists = if ($childRegResults.ContainsKey($childRegPath)) { $childRegResults[$childRegPath] } else { $false }
+                if (-not $childRegExists) {
+                    $childInfo.Panel.Tag.State              = 'Uninstalled'
+                    $script:UninstallPanelStates[$cpk]      = @{ State = 'Uninstalled'; ExitCode = 0; LogPath = $null; Computer = $ComputerName }
+                    if ($childInfo.StateLabel) { $childInfo.StateLabel.Text = "Uninstalled"; $childInfo.StateLabel.ForeColor = [System.Drawing.Color]::Green }
+                    Write-Log "Child panel auto-updated to Uninstalled : $($childInfo.Panel.Tag.Entry.DisplayName)"
                 }
             }
         }
