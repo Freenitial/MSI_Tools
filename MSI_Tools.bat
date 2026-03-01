@@ -8523,6 +8523,7 @@ function Start-UninstallJob {
         MainProcessId    = $null
         ProcessTree      = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
         PreviousCpuTimes = [hashtable]::Synchronized(@{})
+        DebugMessages    = [System.Collections.ArrayList]::Synchronized([System.Collections.ArrayList]::new())
     })
     $cancelButton.Tag = @{ SyncHash = $jobSyncHash; Panel = $ProductPanel }
     $cancelButton.Add_Click({
@@ -8719,6 +8720,7 @@ function Start-UninstallJob {
                 $remotePrevCpuTimes  = @{}
                 while ($remoteJob.State -eq 'Running') {
                     if ($SyncHash.CancelRequested) {
+                        $SyncHash.DebugMessages.Add("Cancel detected in runspace loop") | Out-Null
                         $knownPids = [System.Collections.Generic.HashSet[int]]::new()
                         foreach ($p in @($SyncHash.ProcessTree)) {
                             if ($p.PID -gt 0) { [void]$knownPids.Add($p.PID) }
@@ -8726,31 +8728,72 @@ function Start-UninstallJob {
                         if ($SyncHash.MainProcessId -and $SyncHash.MainProcessId -gt 0) {
                             [void]$knownPids.Add($SyncHash.MainProcessId)
                         }
+                        $SyncHash.DebugMessages.Add("Known PIDs to kill : $($knownPids -join ', ')") | Out-Null
                         if ($knownPids.Count -gt 0) {
                             try {
-                                Invoke-Command @invokeBase -ScriptBlock {
-                                    param([int[]]$PidsToKill)
-                                    $allTargetPids = [System.Collections.Generic.HashSet[int]]::new()
-                                    foreach ($targetPid in $PidsToKill) { [void]$allTargetPids.Add($targetPid) }
-                                    try {
-                                        $allProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
-                                        if ($allProcs) {
-                                            $changed = $true
-                                            while ($changed) {
-                                                $changed = $false
-                                                foreach ($p in $allProcs) {
-                                                    if ($allTargetPids.Contains($p.ParentProcessId) -and $allTargetPids.Add($p.ProcessId)) { $changed = $true }
+                                $SyncHash.DebugMessages.Add("Sending async kill command to $RemoteComputerName") | Out-Null
+                                $pidsArray = [int[]]@($knownPids)
+                                $killParams = @{
+                                    ComputerName = $RemoteComputerName
+                                    ScriptBlock  = {
+                                        param([int[]]$PidsToKill)
+                                        $allTargetPids = [System.Collections.Generic.HashSet[int]]::new()
+                                        foreach ($targetPid in $PidsToKill) { [void]$allTargetPids.Add($targetPid) }
+                                        try {
+                                            $allProcs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
+                                            if ($allProcs) {
+                                                $changed = $true
+                                                while ($changed) {
+                                                    $changed = $false
+                                                    foreach ($p in $allProcs) {
+                                                        if ($allTargetPids.Contains($p.ParentProcessId) -and $allTargetPids.Add($p.ProcessId)) { $changed = $true }
+                                                    }
                                                 }
                                             }
+                                        } catch { }
+                                        foreach ($targetPid in ($allTargetPids | Sort-Object -Descending)) {
+                                            try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch { }
                                         }
-                                    } catch { }
-                                    foreach ($targetPid in ($allTargetPids | Sort-Object -Descending)) {
-                                        try { Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue } catch { }
                                     }
-                                } -ArgumentList (,$knownPids.ToArray())
-                            } catch { }
+                                    ArgumentList = (,$pidsArray)
+                                    AsJob        = $true
+                                    ErrorAction  = 'Stop'
+                                }
+                                if ($RemoteCredential) { $killParams.Credential = $RemoteCredential }
+                                $killJob = Invoke-Command @killParams
+                                $SyncHash.DebugMessages.Add("Kill job started, waiting with 15s timeout") | Out-Null
+                                $killCompleted = $killJob | Wait-Job -Timeout 15
+                                if ($killCompleted) {
+                                    $SyncHash.DebugMessages.Add("Kill job completed within timeout") | Out-Null
+                                }
+                                else {
+                                    $SyncHash.DebugMessages.Add("Kill job timed out after 15s, forcing removal") | Out-Null
+                                }
+                                Remove-Job $killJob -ErrorAction SilentlyContinue
+                            }
+                            catch {
+                                $SyncHash.DebugMessages.Add("Kill command failed : $($_.Exception.Message)") | Out-Null
+                            }
                         }
-                        try { Stop-Job $remoteJob -Force } catch { }
+                        else {
+                            $SyncHash.DebugMessages.Add("No known PIDs to kill, skipping remote kill") | Out-Null
+                        }
+                        $SyncHash.DebugMessages.Add("Stopping remote execution job (Stop-Job)") | Out-Null
+                        try {
+                            $remoteJob | Stop-Job -ErrorAction SilentlyContinue
+                            $SyncHash.DebugMessages.Add("Stop-Job sent, waiting with 10s timeout") | Out-Null
+                            $stopCompleted = $remoteJob | Wait-Job -Timeout 10
+                            if ($stopCompleted) {
+                                $SyncHash.DebugMessages.Add("Remote job stopped within timeout") | Out-Null
+                            }
+                            else {
+                                $SyncHash.DebugMessages.Add("Remote job stop timed out after 10s, proceeding to break") | Out-Null
+                            }
+                        }
+                        catch {
+                            $SyncHash.DebugMessages.Add("Stop-Job failed : $($_.Exception.Message)") | Out-Null
+                        }
+                        $SyncHash.DebugMessages.Add("Breaking out of monitoring loop") | Out-Null
                         break
                     }
                     $now = [datetime]::Now
@@ -9068,6 +9111,12 @@ $uninstallTimer.Add_Tick({
         $syncHash = $jobInfo.SyncHash
         if (-not $syncHash.IsComplete) {
             Update-ProcessMonitorDisplay -JobId $jobId
+            # Flush debug messages from runspace to main log
+            while ($syncHash.DebugMessages.Count -gt 0) {
+                $msg = $syncHash.DebugMessages[0]
+                $syncHash.DebugMessages.RemoveAt(0)
+                Write-Log "[Runspace:$jobId] $msg"
+            }
             # Show log button during uninstall when log file is detected
             if ($syncHash.FoundLogPath -and $jobInfo.Panel -and $jobInfo.Panel.Tag.ShowLogDuringUninstall) {
                 $logBtn = $jobInfo.Panel.Tag.ShowLogDuringUninstall
