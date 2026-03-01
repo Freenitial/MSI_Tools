@@ -1,6 +1,6 @@
 # MSI Tools — Documentation Technique
 
-> **Version** : 1.0  
+> **Version** : 1.1  
 > **Auteur** : Léo Gillet — Freenitial  
 > **Runtime** : PowerShell 5.1+ / .NET Framework 4.5+  
 > **Privilèges** : Fonctionne sans droits admin — Droits admin recommandés pour les fonctionnalités réseau et nettoyage
@@ -64,9 +64,11 @@ Le script utilise le pattern **polyglot batch/PowerShell** :
 | **WinForms** | Interface graphique (aucun WPF) |
 | **C# inline (`Add-Type`)** | Interop Win32, gestion des raccourcis, drag & drop élevé, tri des ListView, thème visuel |
 | **COM `WindowsInstaller.Installer`** | Lecture des fichiers `.msi` (tables Property, Feature, Icon, ComboBox, CheckBox, etc.) |
+| **`IcoBuilder` (C# inline)** | Extraction d'icônes depuis des PE via `PrivateExtractIcons`, parsing des ressources `RT_GROUP_ICON` |
 | **`Microsoft.Win32.Registry`** | Accès registre natif (pas de `Get-ItemProperty`) pour les performances |
 | **Runspaces** | Opérations longues en arrière-plan (scan, comparaison, désinstallation) sans bloquer l'UI |
 | **WinRM / `Invoke-Command`** | Exécution distante de tous les scans et opérations de nettoyage |
+| **NTFS Alternate Data Streams** | Stockage de l'icône applicative directement dans le flux ADS icon.ico des raccourcis .lnk via CreateFileW
 
 ### 2.3 Barre de titre personnalisée
 
@@ -80,10 +82,36 @@ L'application utilise `FormBorderStyle = 'None'` avec une barre de titre WinForm
 ### 2.4 Identité taskbar (AppUserModelID)
 
 Pour que Windows affiche une icône distincte dans la barre des tâches (au lieu de l'icône PowerShell) :
-
 1. `SetCurrentProcessExplicitAppUserModelID` est appelé au lancement
-2. Un raccourci `.lnk` est créé dans le Start Menu avec le même AppUserModelID via l'interface COM `IPropertyStore`
-3. Ce raccourci est **temporaire** : il est supprimé à la fermeture, sauf si l'utilisateur clique "Keep in Start Menu" dans la boîte About
+2. Un ICO multi-résolution (16→256px) est généré en mémoire par `IcoBuilder::BuildFromBitmap` à partir du PNG base64 embarqué
+3. Un raccourci `.lnk` est créé dans le Start Menu via `ShortcutHelper::CreateWithEmbeddedIcon`, qui :
+   - Définit le même `AppUserModelID` via l'interface COM `IPropertyStore`
+   - Référence l'icône comme `lnkPath + ":icon.ico"` (flux ADS) via `IShellLink::SetIconLocation`
+4. Les bytes ICO sont écrits dans le flux NTFS Alternate Data Stream `icon.ico` du fichier `.lnk` via `AdsHelper::WriteStream` (appel natif `CreateFileW`)
+5. Ce raccourci est **temporaire** : il est supprimé à la fermeture, sauf si l'utilisateur clique "Keep in Start Menu" dans la boîte About
+
+### 2.5 Icône applicative via Alternate Data Streams
+
+L'icône de l'application n'est pas stockée dans un fichier `.ico` externe. Elle est embarquée dans le script en base64 (PNG 128x128), puis convertie à la volée en ICO multi-résolution par la classe C# `IcoBuilder`.
+
+| Classe C# | Rôle |
+|---|---|
+| `IcoBuilder` | Génère un ICO multi-taille (16, 24, 32, 48, 64, 128, 256px) depuis un `Bitmap`, du base64 ou un exécutable PE. Chaque taille est encodée en PNG dans le conteneur ICO. |
+| `ShortcutHelper` | Crée des raccourcis `.lnk` via les interfaces COM `IShellLink` / `IPersistFile` / `IPropertyStore`. L'icône est référencée comme `<chemin.lnk>:icon.ico` (flux ADS). |
+| `AdsHelper` | Lecture/écriture de flux NTFS Alternate Data Streams via `CreateFileW` natif. Expose `WriteStream` et `GetStreamLength`. |
+
+**Flux de création d'un raccourci :**
+```
+1. IcoBuilder::BuildFromBase64(png_base64) → byte[] ICO multi-résolution
+2. ShortcutHelper::CreateWithEmbeddedIcon(lnk, target, args, icoBytes, appId, desc)
+   → IShellLink::SetIconLocation("chemin.lnk:icon.ico", 0)
+   → IPropertyStore::SetValue(PKEY_AppUserModel_ID, appId)
+   → IPersistFile::Save()
+3. AdsHelper::WriteStream("chemin.lnk", "icon.ico", icoBytes)
+   → CreateFileW("chemin.lnk:icon.ico", GENERIC_WRITE, ..., CREATE_ALWAYS, ...)
+```
+
+**Avantage** : Aucun fichier externe à maintenir. L'icône voyage avec le `.lnk`. La suppression du raccourci supprime automatiquement le flux ADS.
 
 ---
 
@@ -192,7 +220,7 @@ La fonction `Get-FilesRecursive` :
 
 ### ListView (panneau droit)
 
-Pour chaque fichier trouvé, `Get-MsiInfo` est appelé en mode simple (sans `-Full`) pour extraire uniquement `ProductCode`, `ProductName`, `ProductVersion`.
+Pour chaque fichier trouvé, `Get-MsiInfo` est appelé en mode simple (sans `-Full`) pour extraire uniquement les propriétés de base.
 
 Les colonnes MSP/MST sont masquables via les checkboxes.
 
@@ -268,7 +296,7 @@ Pour chaque produit trouvé, les emplacements suivants sont scannés :
 | **Dependencies** | `HKLM\SOFTWARE\Classes\Installer\Dependencies` + Wow6432Node + HKCU |
 | **UpgradeCodes** | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UpgradeCodes` + `Classes\Installer\UpgradeCodes` |
 | **Features** | `HKLM\SOFTWARE\Classes\Installer\Features\<CompressedGUID>` + HKCU |
-| **Components** | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Components` |
+| **Components** | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-*\Components` |
 | **InstallerProducts** | `HKLM\SOFTWARE\Classes\Installer\Products\<CompressedGUID>` + HKCU |
 | **InstallerFolders** | `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\Folders` (valeurs correspondant au nom du produit ou InstallLocation) |
 | **InstallerFiles** | Dossier `C:\Windows\Installer\<GUID>` + fichier `LocalPackage` référencé dans UserData |
@@ -488,8 +516,7 @@ Timeout configurable : 10s pour les opérations automatisées, 60s quand un prom
 | Ressource | Condition | Détail |
 |---|---|---|
 | `%TEMP%\MSI_Tools\*.log` | Toujours | Fichiers de log (rotation à 10 fichiers) |
-| `%APPDATA%\MSI_Tools\MSI_Tools.ico` | Au premier lancement | Icône persistante pour l'identité taskbar |
-| `%APPDATA%\...\Start Menu\Programs\MSI Tools.lnk` | Au lancement | Raccourci temporaire (supprimé à la fermeture sauf si "Keep in Start Menu") |
+| `%APPDATA%\...\Start Menu\Programs\MSI Tools.lnk` | Au lancement | Raccourci avec icône injectée (supprimé à la fermeture sauf si "Keep in Start Menu") |
 | `WSMan:\localhost\Client\TrustedHosts` | Action utilisateur (Repair) | IPs ajoutées, nettoyées à la fermeture |
 | Sessions SMB (`\\target\IPC$`) | Connexion distante avec credentials | Nettoyées à la fermeture |
 | Credentials Windows (`CredWrite`) | Connexion distante avec credentials | Supprimés à la fermeture |
@@ -527,11 +554,10 @@ Timeout configurable : 10s pour les opérations automatisées, 60s quand un prom
 
 ## 10. Fichiers créés sur le système
 
-### Persistants (si "Keep in Start Menu")
+### Persistants (si "Keep in Start Menu" coché dans la boite "About")
 
 | Fichier | Chemin |
 |---|---|
-| Icône | `%APPDATA%\MSI_Tools\MSI_Tools.ico` |
 | Raccourci Start Menu | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\MSI Tools.lnk` |
 
 ### Temporaires (nettoyés automatiquement)
@@ -539,9 +565,6 @@ Timeout configurable : 10s pour les opérations automatisées, 60s quand un prom
 | Fichier | Chemin | Nettoyage |
 |---|---|---|
 | Logs | `%TEMP%\MSI_Tools\MSI_Tools_YYYYMMDD.log` | Rotation à 10 fichiers |
-| Icônes extraites | `%TEMP%\msi_icon_*.exe` | Immédiat après extraction |
-| Icons copiées | `%TEMP%\<ProductName>.png` | Pas de nettoyage automatique |
-| Logs distants copiés | `%TEMP%\Remote_<Computer>_*.log` | Pas de nettoyage automatique |
 | Raccourci Start Menu (si non pinned) | `%APPDATA%\...\Start Menu\Programs\MSI Tools.lnk` | À la fermeture |
 
 ---
@@ -564,9 +587,8 @@ Une confirmation est demandée si des jobs de désinstallation sont encore en co
 | **PowerShell 5.1** | Pas testé avec PowerShell 7+ (les classes COM et WinForms peuvent se comporter différemment) |
 | **x64 uniquement** | Le script redirige vers `Sysnative` si lancé en x86, mais l'UI est conçue pour x64 |
 | **Pas de signature de code** | Nécessite `-ExecutionPolicy Bypass` |
-| **Regedit automation** | Dépend de la structure UI de regedit (fragile entre versions de Windows). Supporte EN/FR via scan des menus |
+| **Regedit automation** | Dépend de la structure UI de regedit (fragile entre versions de Windows).
 | **RemoteRegistry** | Nécessaire pour certaines opérations Tab 4 Cleanup. L'outil peut le démarrer mais ne peut pas le configurer si le service est désactivé par GPO |
 | **Détection utilisateur console** | Utilise WTS API puis WMI en fallback. Ne fonctionne pas si aucun utilisateur n'est connecté en console |
 | **Détection parent-enfant** | Basée sur les Dependencies registry. Peut manquer des relations si l'installeur n'utilise pas ce mécanisme standard (exemple : redist c++)|
-| **Scan de Components** | Ne scanne que `S-1-5-18` (LocalSystem). Les composants installés per-user sous d'autres SIDs ne sont pas détectés |
 | **Force ACL** | Peut échouer sur des clés protégées par TrustedInstaller (nécessiterait un token spécifique) |
