@@ -60,7 +60,7 @@ $iconImage  = [System.Drawing.Image]::FromStream($iconStream)
 # ── Loading splash form ──
 $loadingForm = New-Object System.Windows.Forms.Form
 $loadingForm.SuspendLayout()
-$loadingForm.Text            = "MSI Properties Viewer"
+$loadingForm.Text            = "MSI Tools"
 $loadingForm.Font            = New-Object System.Drawing.Font("Microsoft Sans Serif", 8.25, [System.Drawing.FontStyle]::Regular)
 $loadingForm.AutoScaleDimensions = New-Object System.Drawing.SizeF(96, 96)
 $loadingForm.AutoScaleMode   = [System.Windows.Forms.AutoScaleMode]::Dpi
@@ -12070,3 +12070,4 @@ $form.Add_FormClosed({
 $form.ResumeLayout()
 [System.Windows.Forms.Application]::Run($form)
 Write-Log "MSI Tools ended"
+
