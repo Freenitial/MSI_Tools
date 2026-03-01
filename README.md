@@ -27,7 +27,7 @@
 - **Detected Properties** panel: automatically identifies configurable install options from UI tables (ComboBox, ListBox, RadioButton, CheckBox) and boolean properties
 - Multi-MSI cache: load and switch between several MSI files
 
-![Tab1](https://github.com/user-attachments/assets/5b9ca6c9-ace4-499e-8424-939e731ce638)
+![ezgif-6a2088b7915f7a0b](https://github.com/user-attachments/assets/b173a131-34b0-4986-a340-8dcdf249ee31)
 
 --------------------
 
@@ -62,7 +62,7 @@
 - **Cross-tab synchronization**: expand/collapse, selection, and checkbox states are preserved across sub-tabs
 - Fast mode (single batch call) or Progressbar mode (granular progress per category)
 
-
+![VideoProject1-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/a2793ce4-7a78-4ebc-9367-9470602a57fa)
 
 --------------------
 
