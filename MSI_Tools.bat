@@ -2,12 +2,11 @@
     @echo off & Title MSI Tools
     if exist %SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe   set "powershell=%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe"
     if exist %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe  set "powershell=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
-    %powershell% -NoLogo -NoProfile -Ex Bypass -Window Hidden -Command "$batFile='%~f0';$sb=[ScriptBlock]::Create([IO.File]::ReadAllText('%~f0'));&$sb"
+    %powershell% -noexit -NoLogo -NoProfile -Ex Bypass -Window normal -Command "$batFile='%~f0';$sb=[ScriptBlock]::Create([IO.File]::ReadAllText('%~f0'));&$sb"
     exit /b
 #>
 
-
-$script:Version = [version]"1.1"
+$script:Version = [version]"1.2"
 
 # ── Persistent paths for taskbar identity and shortcut management ──
 $script:AppId          = "MSI-Tools.Freenitial.1"
@@ -102,9 +101,11 @@ $loadingForm.ResumeLayout($true)
 $loadingForm.Show()
 [System.Windows.Forms.Application]::DoEvents()
 
-# ── Taskbar AppUserModelID · Shell shortcut with ADS icon · ICO builder · ADS helper ──
-Add-Type -Language CSharp -ReferencedAssemblies System.Drawing -TypeDefinition @'
+# ── C# ──
+Add-Type -Language CSharp -ReferencedAssemblies System.Drawing, System.Windows.Forms -TypeDefinition @'
 using System;
+using System.Windows.Forms;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -114,6 +115,308 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
+
+public class CustomForm : Form
+{
+    private const int WM_NCHITTEST = 0x84;
+    private const int WM_GETMINMAXINFO = 0x24;
+    private const int WM_ENTERSIZEMOVE = 0x0231;
+    private const int WM_EXITSIZEMOVE = 0x0232;
+    private const int WM_ERASEBKGND = 0x14;
+    private const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13;
+    private const int HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
+    private const int GRIP = 6;
+    private bool isResizing = false;
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT { public int X; public int Y; }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MINMAXINFO {
+        public POINT ptReserved;
+        public POINT ptMaxSize;
+        public POINT ptMaxPosition;
+        public POINT ptMinTrackSize;
+        public POINT ptMaxTrackSize;
+    }
+    public event EventHandler<Message> OnWindowMessage;
+    public CustomForm()
+    {
+        SetStyle(
+            ControlStyles.AllPaintingInWmPaint |
+            ControlStyles.OptimizedDoubleBuffer,
+            true);
+        UpdateStyles();
+    }
+    private void SuspendLayoutRecursive(Control parent)
+    {
+        parent.SuspendLayout();
+        foreach (Control c in parent.Controls) SuspendLayoutRecursive(c);
+    }
+    private void ResumeLayoutRecursive(Control parent)
+    {
+        foreach (Control c in parent.Controls) ResumeLayoutRecursive(c);
+        parent.ResumeLayout(true);
+    }
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_ERASEBKGND && isResizing) {
+            m.Result = (IntPtr)1;
+            return;
+        }
+        if (m.Msg == WM_ENTERSIZEMOVE) {
+            isResizing = true;
+            SuspendLayoutRecursive(this);
+            base.WndProc(ref m);
+            if (OnWindowMessage != null) OnWindowMessage(this, m);
+            return;
+        }
+        if (m.Msg == WM_EXITSIZEMOVE) {
+            isResizing = false;
+            ResumeLayoutRecursive(this);
+            Refresh();
+            base.WndProc(ref m);
+            if (OnWindowMessage != null) OnWindowMessage(this, m);
+            return;
+        }
+        if (m.Msg == WM_GETMINMAXINFO) {
+            base.WndProc(ref m);
+            MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
+            Screen screen = Screen.FromHandle(Handle);
+            Rectangle work = screen.WorkingArea;
+            mmi.ptMaxPosition.X = work.X - screen.Bounds.X;
+            mmi.ptMaxPosition.Y = work.Y - screen.Bounds.Y;
+            mmi.ptMaxSize.X = work.Width;
+            mmi.ptMaxSize.Y = work.Height;
+            Marshal.StructureToPtr(mmi, m.LParam, true);
+            if (OnWindowMessage != null) OnWindowMessage(this, m);
+            return;
+        }
+        if (m.Msg == WM_NCHITTEST) {
+            base.WndProc(ref m);
+            var pos = this.PointToClient(new System.Drawing.Point((int)m.LParam & 0xFFFF, (int)m.LParam >> 16 & 0xFFFF));
+            int w = ClientSize.Width, h = ClientSize.Height;
+            bool top = pos.Y <= GRIP, bottom = pos.Y >= h - GRIP, left = pos.X <= GRIP, right = pos.X >= w - GRIP;
+            if      (top && left)     m.Result = (IntPtr)HTTOPLEFT;
+            else if (top && right)    m.Result = (IntPtr)HTTOPRIGHT;
+            else if (bottom && left)  m.Result = (IntPtr)HTBOTTOMLEFT;
+            else if (bottom && right) m.Result = (IntPtr)HTBOTTOMRIGHT;
+            else if (top)             m.Result = (IntPtr)HTTOP;
+            else if (bottom)          m.Result = (IntPtr)HTBOTTOM;
+            else if (left)            m.Result = (IntPtr)HTLEFT;
+            else if (right)           m.Result = (IntPtr)HTRIGHT;
+            if (OnWindowMessage != null) OnWindowMessage(this, m);
+            return;
+        }
+        base.WndProc(ref m);
+        if (OnWindowMessage != null) OnWindowMessage(this, m);
+    }
+}
+public class DoubleBufferedPanel : Panel
+{
+    public DoubleBufferedPanel()
+    {
+        this.DoubleBuffered = true;
+        this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+    }
+}
+public static class DwmHelper
+{
+    [DllImport("dwmapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern long DwmSetWindowAttribute(IntPtr hwnd, uint dwAttribute, ref int pvAttribute, uint cbAttribute);
+    public static void SetRoundedCorners(Form form)
+    {
+        int preference = 2;
+        DwmSetWindowAttribute(form.Handle, 33, ref preference, sizeof(int));
+    }
+}
+public class HitTestPassThrough : NativeWindow {
+    const int WM_NCHITTEST=0x84, HTTRANSPARENT=-1;
+    protected override void WndProc(ref Message m) {
+        if(m.Msg==WM_NCHITTEST){ m.Result=(IntPtr)HTTRANSPARENT; return; }
+        base.WndProc(ref m); }
+}
+public class Win11TitleBar : Panel {
+    [DllImport("user32.dll")] static extern int SendMessage(IntPtr h,int m,int w,int l);
+    [DllImport("user32.dll")] static extern bool ReleaseCapture();
+    const int WM_NCLBUTTONDOWN=0xA1, HT_CAPTION=2, WM_NCHITTEST=0x84, HTTRANSPARENT=-1, GRIP=6;
+    const int WM_LBUTTONDBLCLK=0x203;
+    public event EventHandler TitleBarDoubleClick;
+    public Win11TitleBar() { DoubleBuffered=true;
+        SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.UserPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.StandardDoubleClick,true); }
+    protected override void WndProc(ref Message m) {
+        if(m.Msg==WM_LBUTTONDBLCLK){ if(TitleBarDoubleClick!=null) TitleBarDoubleClick(this,EventArgs.Empty); return; }
+        if(m.Msg==WM_NCHITTEST){ base.WndProc(ref m);
+            var sp=new Point((int)m.LParam&0xFFFF,(int)m.LParam>>16&0xFFFF); var pos=PointToClient(sp);
+            Form f=FindForm(); if(f!=null){ var fp=f.PointToClient(sp);
+                if(pos.Y<=GRIP||fp.X<=GRIP||fp.X>=f.ClientSize.Width-GRIP){m.Result=(IntPtr)HTTRANSPARENT;return;}}return;}
+        base.WndProc(ref m); }
+    public static void DragForm(Form f){ ReleaseCapture(); SendMessage(f.Handle,WM_NCLBUTTONDOWN,HT_CAPTION,0); }
+    protected override void OnMouseDown(MouseEventArgs e){ base.OnMouseDown(e); if(e.Button==MouseButtons.Left) DragForm(FindForm()); }
+}
+public class TitleBarButton : Label {
+    const int WM_NCHITTEST=0x84, HTTRANSPARENT=-1, GRIP=6;
+    public Color HoverBack  { get; set; }
+    public Color NormalBack { get; set; }
+    public Color NormalFore { get; set; }
+    public bool  IsCloseButton { get; set; }
+    public TitleBarButton() { TextAlign=ContentAlignment.MiddleCenter;
+        NormalBack=Color.FromArgb(240,240,240); HoverBack=Color.FromArgb(218,218,218);
+        NormalFore=Color.FromArgb(50,50,50);
+        BackColor=NormalBack; ForeColor=NormalFore;
+        Font=new Font("Segoe MDL2 Assets",10f); Cursor=Cursors.Default; Size=new Size(46,34); }
+    protected override void WndProc(ref Message m) {
+        if(m.Msg==WM_NCHITTEST){ base.WndProc(ref m);
+            var pos=PointToClient(new Point((int)m.LParam&0xFFFF,(int)m.LParam>>16&0xFFFF));
+            Form f=FindForm(); if(f!=null&&pos.Y<=GRIP){m.Result=(IntPtr)HTTRANSPARENT;return;}return;}
+        base.WndProc(ref m); }
+    protected override void OnMouseEnter(EventArgs e){ base.OnMouseEnter(e);
+        BackColor=IsCloseButton?Color.FromArgb(196,43,28):HoverBack;
+        if(IsCloseButton) ForeColor=Color.White; }
+    protected override void OnMouseLeave(EventArgs e){ base.OnMouseLeave(e);
+        BackColor=NormalBack; ForeColor=NormalFore; }
+}
+public class SmoothScrollFilter : IMessageFilter {
+    private const int WM_MOUSEWHEEL = 0x020A;
+    private ScrollableControl panel;
+    private int step;
+    public SmoothScrollFilter(ScrollableControl target, int scrollStep) {
+        panel = target;
+        step = scrollStep;
+    }
+    public bool PreFilterMessage(ref Message m) {
+        if (m.Msg != WM_MOUSEWHEEL) return false;
+        long lp = m.LParam.ToInt64();
+        Point pos = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
+        if (!panel.RectangleToScreen(panel.ClientRectangle).Contains(pos)) return false;
+        long wp = m.WParam.ToInt64();
+        int delta = (short)((wp >> 16) & 0xFFFF);
+        int current = -panel.AutoScrollPosition.Y;
+        int val = current + (delta > 0 ? -step : step);
+        val = Math.Max(0, Math.Min(val, panel.VerticalScroll.Maximum));
+        panel.AutoScrollPosition = new Point(0, val);
+        return true;
+    }
+}
+public class BorderlessTabControl : TabControl {
+    protected override void WndProc(ref Message m) {
+        base.WndProc(ref m);
+        // Expand content area to cover borders using DPI-aware tab dimensions
+        if (m.Msg == 0x1328 && !DesignMode && TabCount > 0) {
+            RECT rc = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
+            int offset = (int)(GetTabRect(0).Height * 0.33);
+            rc.Top    = GetTabRect(0).Bottom + offset;
+            rc.Left   = rc.Left - offset;
+            rc.Right  = Width + offset;
+            rc.Bottom = Height + offset;
+            Marshal.StructureToPtr(rc, m.LParam, true);
+        }
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT {
+        public int Left, Top, Right, Bottom;
+    }
+}
+public class DragDropFix {
+    [DllImport("shell32.dll")]
+    public static extern void DragAcceptFiles(IntPtr hwnd, bool accept);
+    [DllImport("shell32.dll")]
+    public static extern uint DragQueryFile(IntPtr hDrop, uint iFile, [Out] System.Text.StringBuilder lpszFile, uint cch);
+    [DllImport("shell32.dll")]
+    public static extern void DragFinish(IntPtr hDrop);
+    [DllImport("user32.dll")]
+    public static extern bool ChangeWindowMessageFilterEx(IntPtr hwnd, uint msg, uint action, IntPtr pChangeFilterStruct);
+    public static void Enable(IntPtr hwnd) {
+        ChangeWindowMessageFilterEx(hwnd, 0x0233, 1, IntPtr.Zero); // WM_DROPFILES
+        ChangeWindowMessageFilterEx(hwnd, 0x004A, 1, IntPtr.Zero); // WM_COPYDATA
+        ChangeWindowMessageFilterEx(hwnd, 0x0049, 1, IntPtr.Zero); // WM_COPYGLOBALDATA
+        DragAcceptFiles(hwnd, true);
+    }
+    public static string[] GetDroppedFiles(IntPtr hDrop) {
+        uint count = DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
+        string[] files = new string[count];
+        for (uint i = 0; i < count; i++) {
+            uint size = DragQueryFile(hDrop, i, null, 0) + 1;
+            var sb = new System.Text.StringBuilder((int)size);
+            DragQueryFile(hDrop, i, sb, size);
+            files[i] = sb.ToString();
+        }
+        DragFinish(hDrop);
+        return files;
+    }
+}
+public class ListViewItemComparer : IComparer
+{
+    private int col;
+    private SortOrder order;
+    public ListViewItemComparer()
+    {
+        col = 0;
+        order = SortOrder.Ascending;
+    }
+    public ListViewItemComparer(int column, SortOrder sortOrder)
+    {
+        col = column;
+        order = sortOrder;
+    }
+    public int Compare(object x, object y)
+    {
+        int returnVal = -1;
+        returnVal = String.Compare(((ListViewItem)x).SubItems[col].Text,
+                                   ((ListViewItem)y).SubItems[col].Text);
+        if (order == SortOrder.Descending)
+            returnVal *= -1;
+        return returnVal;
+    }
+}
+public class NativeMethods
+{
+    public const int SB_HORZ = 0; // Scroll horizontal
+    public const int SB_VERT = 1;  // Scroll vertical
+    public const int SW_HIDE = 0;
+    public const int SW_SHOW = 5;
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetScrollPos(IntPtr hWnd, int nBar);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
+    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
+    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] public static extern int SetWindowTheme(IntPtr hwnd, string appName, string idList);
+    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+    public const int WM_VSCROLL = 0x0115;
+    public const int WM_HSCROLL = 0x0114;
+    public const int SB_THUMBPOSITION = 4;
+    public const int SB_TOP = 6;
+}
+[StructLayout(LayoutKind.Sequential)]
+public struct WTS_SESSION_INFO {
+    public int SessionId;
+    [MarshalAs(UnmanagedType.LPWStr)]
+    public string pWinStationName;
+    public int State;
+}
+public static class WtsApi32 {
+    [DllImport("kernel32.dll")]
+    public static extern int WTSGetActiveConsoleSessionId();
+    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    public static extern IntPtr WTSOpenServer(string pServerName);
+    [DllImport("wtsapi32.dll")]
+    public static extern void WTSCloseServer(IntPtr hServer);
+    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    public static extern bool WTSQuerySessionInformation(
+        IntPtr hServer,
+        int sessionId,
+        int wtsInfoClass,
+        out IntPtr ppBuffer,
+        out int pBytesReturned
+    );
+    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+    public static extern bool WTSEnumerateSessions(
+        IntPtr hServer,
+        int Reserved,
+        int Version,
+        out IntPtr ppSessionInfo,
+        out int pCount
+    );
+    [DllImport("wtsapi32.dll")]
+    public static extern void WTSFreeMemory(IntPtr pMemory);
+}
 
 // ── Taskbar AppUserModelID ──
 public static class TaskBarHelper
@@ -518,232 +821,16 @@ $script:RegistrySortColumn = -1
 $script:RegistrySortOrder = [System.Windows.Forms.SortOrder]::None
 $script:fromBrowseButton = $false
 $script:SmbSessionsToCleanup = [System.Collections.ArrayList]::new()
-$script:WindowsInstallerCOM = $null
 $script:MsiFileCache = [ordered]@{}  # Key=filePath, Value=@{ FileName; Results; SelectedListView }
 $script:UserPinnedStartMenu = $false
 $script:AboutNormalColor = [System.Drawing.Color]::FromArgb(228, 228, 228)
 $script:AboutHoverColor  = [System.Drawing.Color]::FromArgb(210, 210, 210)
 
-Add-Type -ReferencedAssemblies System.Windows.Forms.dll, System.Drawing.dll -TypeDefinition @"
-using System;
-using System.Windows.Forms;
-using System.Drawing;
-using System.Collections;
-using System.Runtime.InteropServices;
-public class CustomForm : Form
-{
-    private const int WM_NCHITTEST = 0x84;
-    private const int WM_GETMINMAXINFO = 0x24;
-    private const int HTLEFT = 10, HTRIGHT = 11, HTTOP = 12, HTTOPLEFT = 13;
-    private const int HTTOPRIGHT = 14, HTBOTTOM = 15, HTBOTTOMLEFT = 16, HTBOTTOMRIGHT = 17;
-    private const int GRIP = 6;
-    [StructLayout(LayoutKind.Sequential)]
-    private struct POINT { public int X; public int Y; }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MINMAXINFO {
-        public POINT ptReserved;
-        public POINT ptMaxSize;
-        public POINT ptMaxPosition;
-        public POINT ptMinTrackSize;
-        public POINT ptMaxTrackSize;
-    }
-    public event EventHandler<Message> OnWindowMessage;
-    public CustomForm()
-    {
-        SetStyle(
-            ControlStyles.AllPaintingInWmPaint |
-            ControlStyles.OptimizedDoubleBuffer |
-            ControlStyles.ResizeRedraw |
-            ControlStyles.UserPaint,
-            true);
-        UpdateStyles();
-    }
-    protected override void OnResize(EventArgs e)
-    {
-        base.OnResize(e);
-        Invalidate();
-    }
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == WM_GETMINMAXINFO) {
-            base.WndProc(ref m);
-            MINMAXINFO mmi = (MINMAXINFO)Marshal.PtrToStructure(m.LParam, typeof(MINMAXINFO));
-            Screen screen = Screen.FromHandle(Handle);
-            Rectangle work = screen.WorkingArea;
-            mmi.ptMaxPosition.X = work.X - screen.Bounds.X;
-            mmi.ptMaxPosition.Y = work.Y - screen.Bounds.Y;
-            mmi.ptMaxSize.X = work.Width;
-            mmi.ptMaxSize.Y = work.Height;
-            Marshal.StructureToPtr(mmi, m.LParam, true);
-            if (OnWindowMessage != null) OnWindowMessage(this, m);
-            return;
-        }
-        if (m.Msg == WM_NCHITTEST) {
-            base.WndProc(ref m);
-            var pos = this.PointToClient(new System.Drawing.Point((int)m.LParam & 0xFFFF, (int)m.LParam >> 16 & 0xFFFF));
-            int w = ClientSize.Width, h = ClientSize.Height;
-            bool top = pos.Y <= GRIP, bottom = pos.Y >= h - GRIP, left = pos.X <= GRIP, right = pos.X >= w - GRIP;
-            if      (top && left)     m.Result = (IntPtr)HTTOPLEFT;
-            else if (top && right)    m.Result = (IntPtr)HTTOPRIGHT;
-            else if (bottom && left)  m.Result = (IntPtr)HTBOTTOMLEFT;
-            else if (bottom && right) m.Result = (IntPtr)HTBOTTOMRIGHT;
-            else if (top)             m.Result = (IntPtr)HTTOP;
-            else if (bottom)          m.Result = (IntPtr)HTBOTTOM;
-            else if (left)            m.Result = (IntPtr)HTLEFT;
-            else if (right)           m.Result = (IntPtr)HTRIGHT;
-            if (OnWindowMessage != null) OnWindowMessage(this, m);
-            return;
-        }
-        base.WndProc(ref m);
-        if (OnWindowMessage != null) OnWindowMessage(this, m);
-    }
+$script:HitTestPassThruControls = New-Object System.Collections.Generic.List[System.Windows.Forms.Control]
+function Enable-HitTestPassThrough {
+    param([System.Windows.Forms.Control]$Control)
+    $script:HitTestPassThruControls.Add($Control)
 }
-public class SmoothScrollFilter : IMessageFilter {
-    private const int WM_MOUSEWHEEL = 0x020A;
-    private ScrollableControl panel;
-    private int step;
-    public SmoothScrollFilter(ScrollableControl target, int scrollStep) {
-        panel = target;
-        step = scrollStep;
-    }
-    public bool PreFilterMessage(ref Message m) {
-        if (m.Msg != WM_MOUSEWHEEL) return false;
-        long lp = m.LParam.ToInt64();
-        Point pos = new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF));
-        if (!panel.RectangleToScreen(panel.ClientRectangle).Contains(pos)) return false;
-        long wp = m.WParam.ToInt64();
-        int delta = (short)((wp >> 16) & 0xFFFF);
-        int current = -panel.AutoScrollPosition.Y;
-        int val = current + (delta > 0 ? -step : step);
-        val = Math.Max(0, Math.Min(val, panel.VerticalScroll.Maximum));
-        panel.AutoScrollPosition = new Point(0, val);
-        return true;
-    }
-}
-public class BorderlessTabControl : TabControl {
-    protected override void WndProc(ref Message m) {
-        base.WndProc(ref m);
-        // Expand content area to cover borders using DPI-aware tab dimensions
-        if (m.Msg == 0x1328 && !DesignMode && TabCount > 0) {
-            RECT rc = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
-            int offset = (int)(GetTabRect(0).Height * 0.33);
-            rc.Top    = GetTabRect(0).Bottom + offset;
-            rc.Left   = rc.Left - offset;
-            rc.Right  = Width + offset;
-            rc.Bottom = Height + offset;
-            Marshal.StructureToPtr(rc, m.LParam, true);
-        }
-    }
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT {
-        public int Left, Top, Right, Bottom;
-    }
-}
-public class DragDropFix {
-    [DllImport("shell32.dll")]
-    public static extern void DragAcceptFiles(IntPtr hwnd, bool accept);
-    [DllImport("shell32.dll")]
-    public static extern uint DragQueryFile(IntPtr hDrop, uint iFile, [Out] System.Text.StringBuilder lpszFile, uint cch);
-    [DllImport("shell32.dll")]
-    public static extern void DragFinish(IntPtr hDrop);
-    [DllImport("user32.dll")]
-    public static extern bool ChangeWindowMessageFilterEx(IntPtr hwnd, uint msg, uint action, IntPtr pChangeFilterStruct);
-    public static void Enable(IntPtr hwnd) {
-        ChangeWindowMessageFilterEx(hwnd, 0x0233, 1, IntPtr.Zero); // WM_DROPFILES
-        ChangeWindowMessageFilterEx(hwnd, 0x004A, 1, IntPtr.Zero); // WM_COPYDATA
-        ChangeWindowMessageFilterEx(hwnd, 0x0049, 1, IntPtr.Zero); // WM_COPYGLOBALDATA
-        DragAcceptFiles(hwnd, true);
-    }
-    public static string[] GetDroppedFiles(IntPtr hDrop) {
-        uint count = DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
-        string[] files = new string[count];
-        for (uint i = 0; i < count; i++) {
-            uint size = DragQueryFile(hDrop, i, null, 0) + 1;
-            var sb = new System.Text.StringBuilder((int)size);
-            DragQueryFile(hDrop, i, sb, size);
-            files[i] = sb.ToString();
-        }
-        DragFinish(hDrop);
-        return files;
-    }
-}
-public class ListViewItemComparer : IComparer
-{
-    private int col;
-    private SortOrder order;
-    public ListViewItemComparer()
-    {
-        col = 0;
-        order = SortOrder.Ascending;
-    }
-    public ListViewItemComparer(int column, SortOrder sortOrder)
-    {
-        col = column;
-        order = sortOrder;
-    }
-    public int Compare(object x, object y)
-    {
-        int returnVal = -1;
-        returnVal = String.Compare(((ListViewItem)x).SubItems[col].Text,
-                                   ((ListViewItem)y).SubItems[col].Text);
-        if (order == SortOrder.Descending)
-            returnVal *= -1;
-        return returnVal;
-    }
-}
-public class NativeMethods
-{
-    public const int SB_HORZ = 0; // Scroll horizontal
-    public const int SB_VERT = 1;  // Scroll vertical
-    public const int SW_HIDE = 0;
-    public const int SW_SHOW = 5;
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int GetScrollPos(IntPtr hWnd, int nBar);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int SetScrollPos(IntPtr hWnd, int nBar, int nPos, bool bRedraw);
-    [DllImport("user32.dll", CharSet = CharSet.Auto)] public static extern int SendMessage(IntPtr hWnd, int msg, int wParam, int lParam);
-    [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] public static extern int SetWindowTheme(IntPtr hwnd, string appName, string idList);
-    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    public const int WM_VSCROLL = 0x0115;
-    public const int WM_HSCROLL = 0x0114;
-    public const int SB_THUMBPOSITION = 4;
-    public const int SB_TOP = 6;
-}
-[StructLayout(LayoutKind.Sequential)]
-public struct WTS_SESSION_INFO {
-    public int SessionId;
-    [MarshalAs(UnmanagedType.LPWStr)]
-    public string pWinStationName;
-    public int State;
-}
-public static class WtsApi32 {
-    [DllImport("kernel32.dll")]
-    public static extern int WTSGetActiveConsoleSessionId();
-    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    public static extern IntPtr WTSOpenServer(string pServerName);
-    [DllImport("wtsapi32.dll")]
-    public static extern void WTSCloseServer(IntPtr hServer);
-    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    public static extern bool WTSQuerySessionInformation(
-        IntPtr hServer,
-        int sessionId,
-        int wtsInfoClass,
-        out IntPtr ppBuffer,
-        out int pBytesReturned
-    );
-    [DllImport("wtsapi32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
-    public static extern bool WTSEnumerateSessions(
-        IntPtr hServer,
-        int Reserved,
-        int Version,
-        out IntPtr ppSessionInfo,
-        out int pCount
-    );
-    [DllImport("wtsapi32.dll")]
-    public static extern void WTSFreeMemory(IntPtr pMemory);
-}
-"@ -Language CSharp
-
-
 
 #region Common UI
 
@@ -904,91 +991,6 @@ function New-Control {
     return $control
 }
 Set-Alias -Name gen -Value New-Control
-
-# ── Custom title bar with drag support ──
-Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -Language CSharp -TypeDefinition @'
-using System;
-using System.Drawing;
-using System.Windows.Forms;
-using System.Runtime.InteropServices;
-public class DoubleBufferedPanel : Panel
-{
-    public DoubleBufferedPanel()
-    {
-        this.DoubleBuffered = true;
-        this.SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
-    }
-}
-public class HitTestPassThrough : NativeWindow {
-    const int WM_NCHITTEST=0x84, HTTRANSPARENT=-1;
-    protected override void WndProc(ref Message m) {
-        if(m.Msg==WM_NCHITTEST){ m.Result=(IntPtr)HTTRANSPARENT; return; }
-        base.WndProc(ref m); }
-}
-public class Win11TitleBar : Panel {
-    [DllImport("user32.dll")] static extern int SendMessage(IntPtr h,int m,int w,int l);
-    [DllImport("user32.dll")] static extern bool ReleaseCapture();
-    const int WM_NCLBUTTONDOWN=0xA1, HT_CAPTION=2, WM_NCHITTEST=0x84, HTTRANSPARENT=-1, GRIP=6;
-    const int WM_LBUTTONDBLCLK=0x203;
-    public event EventHandler TitleBarDoubleClick;
-    public Win11TitleBar() { DoubleBuffered=true;
-        SetStyle(ControlStyles.AllPaintingInWmPaint|ControlStyles.UserPaint|ControlStyles.OptimizedDoubleBuffer|ControlStyles.StandardDoubleClick,true); }
-    protected override void WndProc(ref Message m) {
-        if(m.Msg==WM_LBUTTONDBLCLK){ if(TitleBarDoubleClick!=null) TitleBarDoubleClick(this,EventArgs.Empty); return; }
-        if(m.Msg==WM_NCHITTEST){ base.WndProc(ref m);
-            var sp=new Point((int)m.LParam&0xFFFF,(int)m.LParam>>16&0xFFFF); var pos=PointToClient(sp);
-            Form f=FindForm(); if(f!=null){ var fp=f.PointToClient(sp);
-                if(pos.Y<=GRIP||fp.X<=GRIP||fp.X>=f.ClientSize.Width-GRIP){m.Result=(IntPtr)HTTRANSPARENT;return;}}return;}
-        base.WndProc(ref m); }
-    public static void DragForm(Form f){ ReleaseCapture(); SendMessage(f.Handle,WM_NCLBUTTONDOWN,HT_CAPTION,0); }
-    protected override void OnMouseDown(MouseEventArgs e){ base.OnMouseDown(e); if(e.Button==MouseButtons.Left) DragForm(FindForm()); }
-}
-public class TitleBarButton : Label {
-    const int WM_NCHITTEST=0x84, HTTRANSPARENT=-1, GRIP=6;
-    public Color HoverBack  { get; set; }
-    public Color NormalBack { get; set; }
-    public Color NormalFore { get; set; }
-    public bool  IsCloseButton { get; set; }
-    public TitleBarButton() { TextAlign=ContentAlignment.MiddleCenter;
-        NormalBack=Color.FromArgb(240,240,240); HoverBack=Color.FromArgb(218,218,218);
-        NormalFore=Color.FromArgb(50,50,50);
-        BackColor=NormalBack; ForeColor=NormalFore;
-        Font=new Font("Segoe MDL2 Assets",10f); Cursor=Cursors.Default; Size=new Size(46,34); }
-    protected override void WndProc(ref Message m) {
-        if(m.Msg==WM_NCHITTEST){ base.WndProc(ref m);
-            var pos=PointToClient(new Point((int)m.LParam&0xFFFF,(int)m.LParam>>16&0xFFFF));
-            Form f=FindForm(); if(f!=null&&pos.Y<=GRIP){m.Result=(IntPtr)HTTRANSPARENT;return;}return;}
-        base.WndProc(ref m); }
-    protected override void OnMouseEnter(EventArgs e){ base.OnMouseEnter(e);
-        BackColor=IsCloseButton?Color.FromArgb(196,43,28):HoverBack;
-        if(IsCloseButton) ForeColor=Color.White; }
-    protected override void OnMouseLeave(EventArgs e){ base.OnMouseLeave(e);
-        BackColor=NormalBack; ForeColor=NormalFore; }
-}
-'@
-
-$script:HitTestPassThruControls = New-Object System.Collections.Generic.List[System.Windows.Forms.Control]
-function Enable-HitTestPassThrough {
-    param([System.Windows.Forms.Control]$Control)
-    $script:HitTestPassThruControls.Add($Control)
-}
-
-# ── Rounded corners window ──
-Add-Type -ReferencedAssemblies System.Windows.Forms -Language CSharp -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
-public static class DwmHelper
-{
-    [DllImport("dwmapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern long DwmSetWindowAttribute(IntPtr hwnd, uint dwAttribute, ref int pvAttribute, uint cbAttribute);
-    public static void SetRoundedCorners(Form form)
-    {
-        int preference = 2;
-        DwmSetWindowAttribute(form.Handle, 33, ref preference, sizeof(int));
-    }
-}
-'@
 
 $titleBarColor  = [System.Drawing.Color]::FromArgb(240, 240, 240)
 $clientColor    = [System.Drawing.Color]::FromArgb(243, 243, 243)
@@ -1207,9 +1209,11 @@ $btnAbout.Add_Click({
     $aboutFormText = @"
 $([char]0x2022)  v1.0 : First release
 $([char]0x2022)  v1.1 : DPI scaling support, optimizations, bug fixes
+$([char]0x2022)  v1.2 : Network and UI bug fixes
 "@
     $changelogPanel = gen $aboutForm "Panel" "" 20 185 ($aboutForm.ClientSize.Width - 40) ($aboutForm.ClientSize.Height - 200) "AutoScroll=$true" "BackColor=$bgCol" 'Padding=0 0 0 10'
-    $changelogLabel = gen $changelogPanel "Label" $aboutFormText 5 0 0 0 "Font=Arial, 9" "AutoSize=$true" "ForeColor=$fgCol" "MaximumSize=$(New-Object System.Drawing.Size(($changelogPanel.Width - 25), 0))"
+    $changelogLabel = gen $changelogPanel "Label" $aboutFormText 5 0 0 0 "Font=Arial, 9" "AutoSize=$true" "ForeColor=$fgCol" 
+    $changelogLabel.MaximumSize=$(New-Object System.Drawing.Size(($changelogPanel.Width - 10), 0))
     Write-Log "About dialog opened" -Level Debug
     $aboutForm.ResumeLayout()
     $aboutForm.ShowDialog($form) | Out-Null
@@ -1720,7 +1724,7 @@ function Format-FileSize {
     else                           { return "{0:N2} KB" -f ($Bytes / 1024) }
 }
 
-Function HandleColumnClick {
+Function Invoke-ColumnClick {
     param ([System.Windows.Forms.ListView]$listViewparam, [System.Windows.Forms.ColumnClickEventArgs]$e)
     if ($e.Column -eq $script:sortColumn) {
         $script:sortOrder = if ($script:sortOrder -eq [System.Windows.Forms.SortOrder]::Ascending) {[System.Windows.Forms.SortOrder]::Descending} else {[System.Windows.Forms.SortOrder]::Ascending}
@@ -1776,7 +1780,7 @@ Function Update-ProgressBarWidth {
     $progressBar.Width = $availableWidth
 }
 
-function ConfigureListViewContextMenu($listView) {
+function Set-ListViewContextMenu($listView) {
     $contextMenu     = [System.Windows.Forms.ContextMenuStrip]::new()
     $contextMenu.Tag = $listView
     $items           = $contextMenu.Items
@@ -1858,8 +1862,8 @@ function ConfigureListViewContextMenu($listView) {
     }
     # =========================================== EXPORT (all tabs)
     [void](& $addSep)
-    [void](& $addItem "Export"     { ListExport -listview $this.GetCurrentParent().Tag -all $false })
-    [void](& $addItem "Export All" { ListExport -listview $this.GetCurrentParent().Tag -all $true })
+    [void](& $addItem "Export"     { Invoke-Export -listview $this.GetCurrentParent().Tag -all $false })
+    [void](& $addItem "Export All" { Invoke-Export -listview $this.GetCurrentParent().Tag -all $true })
     # =========================================== EXPLORE TAB 2 (file operations + shell items)
     if ($colMap.ContainsKey("Path")) {
         [void](& $addSep)
@@ -2512,7 +2516,7 @@ function Open-FileSystemPath {
     }
 }
 
-function AdjustListViewColumns {
+function Update-ListViewColumns {
     param([System.Windows.Forms.ListView]$listView)
     # Reserve 10px to prevent horizontal scrollbar from appearing
     $totalWidth = $listView.ClientSize.Width - 10
@@ -2627,6 +2631,17 @@ namespace NetSession {
         }
         public static bool DeleteDomainCredential(string target) {
             return CredDelete(target, 2, 0);
+        }
+        [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        public static extern bool CredRead(string targetName, int type, int flags, out IntPtr credential);
+        [DllImport("advapi32.dll")]
+        public static extern void CredFree(IntPtr credential);
+        // Check whether a CRED_TYPE_DOMAIN_PASSWORD credential already exists for a target
+        public static bool HasDomainCredential(string target) {
+            IntPtr credPtr;
+            bool exists = CredRead(target, 2, 0, out credPtr);
+            if (exists && credPtr != IntPtr.Zero) CredFree(credPtr);
+            return exists;
         }
     }
 }
@@ -2848,34 +2863,95 @@ function Test-RemoteConnections {
                 Write-Information "sc.exe exception for ${computer} : $_"
             }
         }
-        # Invoke-Command method (supports PSCredential)
+        # Combined Invoke-Command : RemoteRegistry service check + registry access test
         if ($null -eq $serviceState) {
             try {
-                Write-Information "Checking RemoteRegistry on $computer via Invoke-Command"
-                $svcParams = @{
+                Write-Information "Checking RemoteRegistry and registry access on $computer via Invoke-Command"
+                $combinedParams = @{
                     ComputerName = $computer
                     ScriptBlock  = {
-                        $svc = Get-Service -Name RemoteRegistry -ErrorAction Stop
-                        $wmi = Get-WmiObject Win32_Service -Filter "Name='RemoteRegistry'" -ErrorAction SilentlyContinue
-                        return @{
-                            State     = $svc.Status.ToString()
-                            StartType = if ($wmi) { $wmi.StartMode } else { 'Unknown' }
+                        $info = @{
+                            ServiceState     = $null
+                            ServiceStartType = 'Unknown'
+                            RegistryOk       = $false
+                            RegistryError    = ""
+                            StartAttempted   = $false
+                            StartSuccess     = $false
+                            StartError       = ""
                         }
+                        # Service state
+                        try {
+                            $svc = Get-Service -Name RemoteRegistry -ErrorAction Stop
+                            $wmi = Get-WmiObject Win32_Service -Filter "Name='RemoteRegistry'" -ErrorAction SilentlyContinue
+                            $info.ServiceState     = $svc.Status.ToString()
+                            $info.ServiceStartType = if ($wmi) { $wmi.StartMode } else { 'Unknown' }
+                        }
+                        catch { $info.ServiceState = 'Error' }
+                        # Auto-start if needed and possible
+                        if ($info.ServiceState -ne 'Running' -and $info.ServiceStartType -notmatch 'Disabled' -and $info.ServiceStartType -notmatch 'Manual') {
+                            $info.StartAttempted = $true
+                            try {
+                                Set-Service -Name RemoteRegistry -StartupType Manual -ErrorAction Stop
+                                Start-Service -Name RemoteRegistry -ErrorAction Stop
+                                Start-Sleep -Milliseconds 500
+                                $svc = Get-Service -Name RemoteRegistry -ErrorAction Stop
+                                $info.StartSuccess  = ($svc.Status -eq 'Running')
+                                $info.ServiceState  = $svc.Status.ToString()
+                                if (-not $info.StartSuccess) { $info.StartError = "Service status : $($svc.Status)" }
+                            }
+                            catch { $info.StartSuccess = $false; $info.StartError = $_.Exception.Message }
+                        }
+                        # Registry access test
+                        try {
+                            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SOFTWARE", $false)
+                            if ($key) { $key.Close(); $info.RegistryOk = $true }
+                            else      { $info.RegistryError = "Could not open SOFTWARE key" }
+                        }
+                        catch { $info.RegistryError = $_.Exception.Message }
+                        return $info
                     }
                     ErrorAction = 'Stop'
                 }
-                if ($cred) { $svcParams.Credential = $cred }
-                $svcInfo = Invoke-Command @svcParams
-                $serviceState = switch ($svcInfo.State) {
+                if ($cred) { $combinedParams.Credential = $cred }
+                $combined = Invoke-Command @combinedParams
+                $serviceState = switch ($combined.ServiceState) {
                     'Running' { 'RUNNING' }
                     'Stopped' { 'STOPPED' }
-                    default   { $svcInfo.State.ToUpper() }
+                    default   { $combined.ServiceState.ToUpper() }
                 }
-                $serviceStartType = $svcInfo.StartType
-                Write-Information "RemoteRegistry on ${computer} : $serviceState (StartType : $serviceStartType)"
+                $serviceStartType = $combined.ServiceStartType
+                # Evaluate results
+                if ($serviceStartType -match 'Disabled|DISABLED' -and $serviceState -ne 'RUNNING') {
+                    $result.IsRemoteRegistryFailure = $true
+                    $result.Status  = "RemoteRegistry Disabled"
+                    $result.Details = "Remote Registry service is disabled on target"
+                    Write-Information "RemoteRegistry is disabled on $computer"
+                    return $result
+                }
+                if ($combined.StartAttempted -and -not $combined.StartSuccess) {
+                    $result.IsRemoteRegistryFailure = $true
+                    $result.Status  = "RemoteRegistry Start Failed"
+                    $result.Details = "Could not start Remote Registry service : $($combined.StartError)"
+                    Write-Information "Failed to start RemoteRegistry on ${computer} : $($combined.StartError)"
+                    return $result
+                }
+                if ($serviceState -ne 'RUNNING' -and $serviceStartType -match 'Manual') {
+                    Write-Information "RemoteRegistry is Manual on ${computer}, should auto-start on registry access"
+                }
+                if ($combined.RegistryOk) {
+                    $result.Success = $true
+                    $result.Status  = "Success"
+                    $result.Details = "All checks passed"
+                }
+                else {
+                    $result.Status  = "Registry Access Denied"
+                    $result.Details = $combined.RegistryError
+                }
             }
             catch {
-                Write-Information "Invoke-Command service check failed for ${computer} : $_"
+                $rawError = $_.Exception.Message
+                $result.RawError = $rawError
+                Write-Information "Combined Invoke-Command failed for ${computer} : $_"
                 $isAccessDenied = $false
                 $currentEx = $_.Exception
                 while ($currentEx -and -not $isAccessDenied) {
@@ -2889,118 +2965,85 @@ function Test-RemoteConnections {
                 if ($isAccessDenied) {
                     $result.Status  = "Access Denied"
                     $result.Details = "Credentials insufficient or rejected by target"
-                    return $result
                 }
-            }
-        }
-        # Act on service state if we managed to retrieve it
-        if ($null -ne $serviceState -and $serviceState -ne 'RUNNING') {
-            if ($null -eq $serviceStartType) {
-                try {
-                    $scConfigOutput = & sc.exe "\\$computer" qc RemoteRegistry 2>&1
-                    $scConfigString = $scConfigOutput -join "`n"
-                    if ($scConfigString -match 'START_TYPE\s+:\s+\d+\s+(\w+)') { $serviceStartType = $matches[1] }
-                }
-                catch { }
-            }
-            if ($null -eq $serviceStartType) { $serviceStartType = 'UNKNOWN' }
-            Write-Information "RemoteRegistry not running on ${computer}, start type : $serviceStartType"
-            if ($serviceStartType -match 'Disabled|DISABLED') {
-                $result.IsRemoteRegistryFailure = $true
-                $result.Status  = "RemoteRegistry Disabled"
-                $result.Details = "Remote Registry service is disabled on target"
-                Write-Information "RemoteRegistry is disabled on $computer"
-                return $result
-            }
-            elseif ($serviceStartType -match 'Manual') {
-                Write-Information "RemoteRegistry service state is Manual on ${computer}, it should auto-start on registry access"
-            }
-            else {
-                Write-Information "Attempting to start RemoteRegistry on $computer"
-                try {
-                    $startParams = @{
-                        ComputerName = $computer
-                        ScriptBlock  = {
-                            try {
-                                Set-Service -Name RemoteRegistry -StartupType Manual -ErrorAction Stop
-                                Start-Service -Name RemoteRegistry -ErrorAction Stop
-                                Start-Sleep -Milliseconds 500
-                                $svc = Get-Service -Name RemoteRegistry -ErrorAction Stop
-                                return @{ Success = ($svc.Status -eq 'Running'); State = $svc.Status.ToString() }
-                            }
-                            catch { return @{ Success = $false; State = $_.Exception.Message } }
-                        }
-                        ErrorAction = 'Stop'
-                    }
-                    if ($cred) { $startParams.Credential = $cred }
-                    $startResult = Invoke-Command @startParams
-                    if ($startResult.Success) {
-                        Write-Information "RemoteRegistry successfully started on $computer"
-                    }
-                    else {
-                        $result.IsRemoteRegistryFailure = $true
-                        $result.Status  = "RemoteRegistry Start Failed"
-                        $result.Details = "Could not start Remote Registry service : $($startResult.State)"
-                        Write-Information "Failed to start RemoteRegistry on ${computer} : $($startResult.State)"
-                        return $result
-                    }
-                }
-                catch {
+                else {
                     $result.IsRemoteRegistryFailure = $true
-                    $result.Status  = "RemoteRegistry Start Failed"
-                    $result.Details = "Remote start attempt failed : $($_.Exception.Message)"
-                    Write-Information "Invoke-Command start failed for ${computer} : $_"
+                    $result.Status                  = "Registry Error"
+                    $result.Details                 = $rawError
+                }
+            }
+        }
+        else {
+            # sc.exe already got the state — still need to handle non-running + registry test
+            if ($serviceState -ne 'RUNNING') {
+                if ($null -eq $serviceStartType) {
+                    try {
+                        $scConfigOutput = & sc.exe "\\$computer" qc RemoteRegistry 2>&1
+                        $scConfigString = $scConfigOutput -join "`n"
+                        if ($scConfigString -match 'START_TYPE\s+:\s+\d+\s+(\w+)') { $serviceStartType = $matches[1] }
+                    }
+                    catch { }
+                }
+                if ($null -eq $serviceStartType) { $serviceStartType = 'UNKNOWN' }
+                Write-Information "RemoteRegistry not running on ${computer}, start type : $serviceStartType"
+                if ($serviceStartType -match 'Disabled|DISABLED') {
+                    $result.IsRemoteRegistryFailure = $true
+                    $result.Status  = "RemoteRegistry Disabled"
+                    $result.Details = "Remote Registry service is disabled on target"
                     return $result
                 }
+                elseif ($serviceStartType -match 'Manual') {
+                    Write-Information "RemoteRegistry is Manual on ${computer}, should auto-start on registry access"
+                }
             }
-        }
-        # Registry access test via Invoke-Command
-        try {
-            $invokeParams = @{
-                ComputerName = $computer
-                ScriptBlock  = {
-                    try {
-                        $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SOFTWARE", $false)
-                        if ($key) { $key.Close(); return @{ Success = $true } }
-                        return @{ Success = $false; Error = "Could not open SOFTWARE key" }
+            # Registry test via Invoke-Command (sc.exe path, service already checked)
+            try {
+                $invokeParams = @{
+                    ComputerName = $computer
+                    ScriptBlock  = {
+                        try {
+                            $key = [Microsoft.Win32.Registry]::LocalMachine.OpenSubKey("SOFTWARE", $false)
+                            if ($key) { $key.Close(); return @{ Success = $true } }
+                            return @{ Success = $false; Error = "Could not open SOFTWARE key" }
+                        }
+                        catch { return @{ Success = $false; Error = $_.Exception.Message } }
                     }
-                    catch { return @{ Success = $false; Error = $_.Exception.Message } }
+                    ErrorAction = 'Stop'
                 }
-                ErrorAction = 'Stop'
-            }
-            if ($cred) { $invokeParams.Credential = $cred }
-            $testResult = Invoke-Command @invokeParams
-            if ($testResult.Success) {
-                $result.Success = $true
-                $result.Status  = "Success"
-                $result.Details = "All checks passed"
-            }
-            else {
-                $result.Status  = "Registry Access Denied"
-                $result.Details = $testResult.Error
-            }
-        }
-        catch {
-            $rawError = $_.Exception.Message
-            $result.RawError = $rawError
-            $isAccessDenied = $false
-            $currentEx = $_.Exception
-            while ($currentEx -and -not $isAccessDenied) {
-                if ($currentEx.GetType().Name -eq 'PSRemotingTransportException' -and $currentEx.ErrorCode -eq 5)   { $isAccessDenied = $true }
-                if ($currentEx.PSObject.Properties['ErrorRecord'] -and $currentEx.ErrorRecord.Exception) {
-                    $embedded = $currentEx.ErrorRecord.Exception
-                    if ($embedded.GetType().Name -eq 'PSRemotingTransportException' -and $embedded.ErrorCode -eq 5) { $isAccessDenied = $true }
+                if ($cred) { $invokeParams.Credential = $cred }
+                $testResult = Invoke-Command @invokeParams
+                if ($testResult.Success) {
+                    $result.Success = $true
+                    $result.Status  = "Success"
+                    $result.Details = "All checks passed"
                 }
-                $currentEx = $currentEx.InnerException
+                else {
+                    $result.Status  = "Registry Access Denied"
+                    $result.Details = $testResult.Error
+                }
             }
-            if ($isAccessDenied) {
-                $result.Status  = "Access Denied"
-                $result.Details = "Credentials insufficient or rejected by target"
-            }
-            else {
-                $result.IsRemoteRegistryFailure = $true
-                $result.Status                  = "Registry Error"
-                $result.Details                 = $rawError
+            catch {
+                $rawError = $_.Exception.Message
+                $result.RawError = $rawError
+                $isAccessDenied = $false
+                $currentEx = $_.Exception
+                while ($currentEx -and -not $isAccessDenied) {
+                    if ($currentEx.GetType().Name -eq 'PSRemotingTransportException' -and $currentEx.ErrorCode -eq 5)   { $isAccessDenied = $true }
+                    if ($currentEx.PSObject.Properties['ErrorRecord'] -and $currentEx.ErrorRecord.Exception) {
+                        $embedded = $currentEx.ErrorRecord.Exception
+                        if ($embedded.GetType().Name -eq 'PSRemotingTransportException' -and $embedded.ErrorCode -eq 5) { $isAccessDenied = $true }
+                    }
+                    $currentEx = $currentEx.InnerException
+                }
+                if ($isAccessDenied) {
+                    $result.Status  = "Access Denied"
+                    $result.Details = "Credentials insufficient or rejected by target"
+                }
+                else {
+                    $result.IsRemoteRegistryFailure = $true
+                    $result.Status                  = "Registry Error"
+                    $result.Details                 = $rawError
+                }
             }
         }
         return $result
@@ -3052,6 +3095,10 @@ function Test-RemoteConnections {
         foreach ($r in $results) {
             if (-not $r.Success) { continue }
             $computer = $r.Computer
+            # Detect pre-existing IPC$ session before establishing a new one
+            $preExistingSmb = & net use 2>&1 | Select-String "\\\\$([regex]::Escape($computer))\\IPC`$"
+            # Detect pre-existing Windows credential for this target
+            $preExistingCred = [NetSession.Native]::HasDomainCredential($computer)
             # SMB session for PowerShell process (elevated logon session)
             $smbResult = [NetSession.Native]::ConnectSmb($computer, $smbUser, $smbPass)
             if ($smbResult -eq 1219) {
@@ -3060,9 +3107,16 @@ function Test-RemoteConnections {
             }
             # Domain credential for explorer.exe (non-elevated logon session)
             $credSaved = [NetSession.Native]::SaveDomainCredential($computer, $smbUser, $smbPass)
-            Write-Log "SMB session for $computer : smb=$smbResult, cred=$credSaved"
-            if ($smbResult -eq 0 -or $credSaved) {
-                [void]$script:SmbSessionsToCleanup.Add($computer)
+            Write-Log "SMB session for $computer : smb=$smbResult, cred=$credSaved, preSmb=$([bool]$preExistingSmb), preCred=$preExistingCred"
+            # Only track resources created by this script for cleanup on exit
+            $shouldCleanSmb  = ($smbResult -eq 0 -or $smbResult -eq 1219) -and -not $preExistingSmb
+            $shouldCleanCred = $credSaved -and -not $preExistingCred
+            if ($shouldCleanSmb -or $shouldCleanCred) {
+                [void]$script:SmbSessionsToCleanup.Add(@{
+                    Computer  = $computer
+                    CleanSmb  = $shouldCleanSmb
+                    CleanCred = $shouldCleanCred
+                })
             }
         }
     }
@@ -3149,14 +3203,21 @@ function Get-RemoteConsoleUser {
                     $structSize = [Runtime.InteropServices.Marshal]::SizeOf([type][WTS_SESSION_INFO])
                     $currentPtr = $ppSessionInfo
                     $consoleSessionId = -1
+                    $fallbackSessionId = -1
                     for ($i = 0; $i -lt $sessionCount; $i++) {
                         $sessionInfo = [Runtime.InteropServices.Marshal]::PtrToStructure($currentPtr, [type][WTS_SESSION_INFO])
-                        if ($sessionInfo.pWinStationName -eq "Console" -and $sessionInfo.State -eq 0) {
-                            $consoleSessionId = $sessionInfo.SessionId
-                            break
+                        if ($sessionInfo.State -eq 0) {
+                            if ($sessionInfo.pWinStationName -eq "Console") {
+                                $consoleSessionId = $sessionInfo.SessionId
+                                break
+                            }
+                            elseif ($fallbackSessionId -lt 0 -and $sessionInfo.pWinStationName -ne "Services") {
+                                $fallbackSessionId = $sessionInfo.SessionId
+                            }
                         }
                         $currentPtr = [IntPtr]::Add($currentPtr, $structSize)
                     }
+                    if ($consoleSessionId -lt 0) { $consoleSessionId = $fallbackSessionId }
                     [WtsApi32]::WTSFreeMemory($ppSessionInfo)
                     $ppSessionInfo = [IntPtr]::Zero
                     if ($consoleSessionId -ge 0) {
@@ -3215,30 +3276,52 @@ function Get-RemoteConsoleUser {
                 ComputerName = $ComputerName
                 ScriptBlock  = {
                     $info = [PSCustomObject]@{ User = ""; SID = ""; FullName = "" }
+                    $domainPrefix = ""
+                    # Primary : Win32_ComputerSystem.UserName (physical console session)
                     try {
                         $cs = Get-WmiObject Win32_ComputerSystem -ErrorAction Stop
                         if ($cs.UserName) {
                             $parts = $cs.UserName -split '\\'
-                            $info.User = $parts[-1]
-                            try {
-                                $ntAccount = New-Object System.Security.Principal.NTAccount($cs.UserName)
-                                $info.SID  = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
-                            }
-                            catch { }
-                            try {
-                                if ($env:USERDNSDOMAIN) {
-                                    $searcher = [adsisearcher]"(samaccountname=$($info.User))"
-                                    $searcher.PropertiesToLoad.Add("displayname") | Out-Null
-                                    $found = $searcher.FindOne()
-                                    if ($found -and $found.Properties["displayname"]) {
-                                        $info.FullName = $found.Properties["displayname"][0]
-                                    }
-                                }
-                            }
-                            catch { }
+                            $info.User    = $parts[-1]
+                            $domainPrefix = if ($parts.Count -gt 1) { $parts[0] } else { "" }
                         }
                     }
                     catch { }
+                    # Fallback : explorer.exe process owner (RDP, Hyper-V, container sessions)
+                    if (-not $info.User) {
+                        try {
+                            $explorers = Get-WmiObject Win32_Process -Filter "Name='explorer.exe'" -ErrorAction SilentlyContinue
+                            if ($explorers) {
+                                $proc  = if ($explorers -is [array]) { $explorers[0] } else { $explorers }
+                                $owner = $proc.GetOwner()
+                                if ($owner -and $owner.ReturnValue -eq 0 -and $owner.User) {
+                                    $info.User    = $owner.User
+                                    $domainPrefix = $owner.Domain
+                                }
+                            }
+                        }
+                        catch { }
+                    }
+                    # Resolve SID and AD display name from discovered user
+                    if ($info.User) {
+                        $accountName = if ($domainPrefix) { "$domainPrefix\$($info.User)" } else { $info.User }
+                        try {
+                            $ntAccount = New-Object System.Security.Principal.NTAccount($accountName)
+                            $info.SID  = $ntAccount.Translate([System.Security.Principal.SecurityIdentifier]).Value
+                        }
+                        catch { }
+                        try {
+                            if ($env:USERDNSDOMAIN) {
+                                $searcher = [adsisearcher]"(samaccountname=$($info.User))"
+                                $searcher.PropertiesToLoad.Add("displayname") | Out-Null
+                                $found = $searcher.FindOne()
+                                if ($found -and $found.Properties["displayname"]) {
+                                    $info.FullName = $found.Properties["displayname"][0]
+                                }
+                            }
+                        }
+                        catch { }
+                    }
                     return $info
                 }
                 ErrorAction = 'Stop'
@@ -3785,12 +3868,24 @@ function Test-RemotePathAccess {
     $textBox_TargetDevice.ForeColor = [System.Drawing.Color]::Black
     $textBox_TargetDevice.Text      = ($computers -join ',')
     $credential = Get-CredentialFromPanel
-    $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-    [System.Windows.Forms.Application]::DoEvents()
+    # Reuse cached results if all requested computers already have a result
+    $needsTest = $false
+    foreach ($comp in $computers) {
+        $cached = $script:RemoteConnectionResults | Where-Object { $_.Computer -eq $comp } | Select-Object -First 1
+        if (-not $cached) { $needsTest = $true; break }
+    }
+    if ($needsTest) {
+        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+        [System.Windows.Forms.Application]::DoEvents()
+        try {
+            $connectionResults = Test-RemoteConnections -Computers $computers.ToArray() -Credential $credential
+            Update-ConnectionStatusDisplay -Results $connectionResults -Credential $credential
+        }
+        finally { $form.Cursor = [System.Windows.Forms.Cursors]::Default }
+    }
     try {
-        $connectionResults = Test-RemoteConnections -Computers $computers.ToArray() -Credential $credential
-        Update-ConnectionStatusDisplay -Results $connectionResults -Credential $credential
         $connectedComputers = @($script:RemoteConnectionResults | Where-Object { $_.Success } | ForEach-Object { $_.Computer })
+        $connectedComputers = @($connectedComputers | Where-Object { $_ -in $computers.ToArray() })
         if ($connectedComputers.Count -eq 0) {
             Write-Log "No remote computers are accessible for UNC path" -Level Warning
             return $false
@@ -3836,6 +3931,14 @@ $button_ConnectionStatus = gen $flowPanel_RemoteTarget "Button"                 
 $button_RestartAsAdmin   = gen $panel_RemoteTarget     "Button"          "RELAUNCH AS ADMIN"   'AutoSize=$true' 'AutoSizeMode=GrowAndShrink' 'Anchor=Top,Right'      'ForeColor=Chocolate'         'Visible=$false'        'FlatStyle=Flat' 'Font=Sergei UI, 6, Bold'
 
 $panel_RemoteTarget.BringToFront()
+# Prevent layout engine from overriding the fixed panel width during tab switches or resize
+$panel_RemoteTarget.Add_SizeChanged({
+    if ($this.Width -ne 700) {
+        $this.Width = 700
+        $this.Left  = $this.Parent.ClientSize.Width - 702
+    }
+})
+
 $textBox_TargetDevice.TabIndex = 0  ;  $textBox_CredentialID.TabIndex = 1  ;  $textBox_CredentialPwd.TabIndex = 2  ;  $button_Connect.TabIndex = 3
 
 $textBox_TargetDevice.Add_KeyPress({ param($s, $e); if ($e.KeyChar -eq [char]13)                              { $e.Handled = $true } })
@@ -4195,51 +4298,54 @@ $pictureBoxIcon   = gen $leftContentPanel "PictureBox" "" 0 0 64 64 'SizeMode=Zo
 $iconButton_Tab1  = gen $leftContentPanel "Button" "" 0 0 70 70 'Visible=$false' 'FlatStyle=Flat' 'BackColor=Transparent' 'BorderColor=LightGray' 'HoverColor=230 230 240' 'Anchor=None'
 $labelFileName    = gen $leftContentPanel "Label" "" 'AutoSize=$true' 'Font=Arial, 16' 'Visible=$false' 'Anchor=None'
 $labelFileSize    = gen $leftContentPanel "Label" "" 'AutoSize=$true' 'Font=Segoe UI, 8' 'ForeColor=Gray' 'Visible=$false' 'Anchor=None'
-
+$leftCentralPanel.Add_Resize({
+    $labelFileName.MaximumSize = [System.Drawing.Size]::new($leftCentralPanel.ClientSize.Width - 20, 0)
+})
 
 # Icon button context menu (copy as file / copy raw)
+$iconContextMenu  = [System.Windows.Forms.ContextMenuStrip]::new()
+$iconMenuItemFile = [System.Windows.Forms.ToolStripMenuItem]::new("Copy as File (48x48)")
+$iconMenuItemRaw  = [System.Windows.Forms.ToolStripMenuItem]::new("Copy Raw Image")
+[void]$iconContextMenu.Items.Add($iconMenuItemFile)
+[void]$iconContextMenu.Items.Add($iconMenuItemRaw)
+$iconMenuItemFile.Add_Click({
+    try {
+        $originalBitmap = $iconButton_Tab1.Tag
+        $resized = New-Object System.Drawing.Bitmap($originalBitmap, 48, 48)
+        $currentPath = $null
+        foreach ($ctrl in $msiSelectorFlowPanel.Controls) {
+            $innerRadio = $ctrl.Controls | Where-Object { $_ -is [System.Windows.Forms.RadioButton] } | Select-Object -First 1
+            if ($innerRadio -and $innerRadio.Checked) { $currentPath = $innerRadio.Tag; break }
+        }
+        $baseName = $null
+        if ($currentPath -and $script:MsiFileCache.Contains($currentPath)) {
+            $pn = $script:MsiFileCache[$currentPath].ProductName
+            if ($pn -and $pn -ne "None") { $baseName = $pn -replace '\s+', '_' }
+        }
+        if (-not $baseName) { $baseName = [System.IO.Path]::GetFileNameWithoutExtension($currentPath) -replace '\s+', '_' }
+        $tmpPng = [System.IO.Path]::Combine($env:TEMP, "$baseName.png")
+        $resized.Save($tmpPng, [System.Drawing.Imaging.ImageFormat]::Png)
+        $resized.Dispose()
+        $files = [System.Collections.Specialized.StringCollection]::new()
+        [void]$files.Add($tmpPng)
+        [System.Windows.Forms.Clipboard]::SetFileDropList($files)
+        Write-Log "Icon copied to clipboard as 48x48 file : $tmpPng"
+    }
+    catch { Write-Log "Failed to copy icon as file : $_" -Level Warning }
+})
+
+$iconMenuItemRaw.Add_Click({
+    try {
+        $originalBitmap = $iconButton_Tab1.Tag
+        [System.Windows.Forms.Clipboard]::SetImage($originalBitmap)
+        Write-Log "Icon copied to clipboard as raw image ($($originalBitmap.Width)x$($originalBitmap.Height))"
+    }
+    catch { Write-Log "Failed to copy raw image : $_" -Level Warning }
+})
+
 $iconButton_Tab1.Add_Click({
     if (-not $this.Tag) { return }
-    $originalBitmap = $this.Tag
-    $menu = New-Object System.Windows.Forms.ContextMenuStrip
-    $itemFile = [System.Windows.Forms.ToolStripMenuItem]::new("Copy as File (48x48)")
-    $itemFile.Tag = $originalBitmap
-    $itemFile.Add_Click({
-        try {
-            $resized = New-Object System.Drawing.Bitmap($this.Tag, 48, 48)
-            $currentPath = $null
-            foreach ($ctrl in $msiSelectorFlowPanel.Controls) {
-                $innerRadio = $ctrl.Controls | Where-Object { $_ -is [System.Windows.Forms.RadioButton] } | Select-Object -First 1
-                if ($innerRadio -and $innerRadio.Checked) { $currentPath = $innerRadio.Tag; break }
-            }
-            $baseName = $null
-            if ($currentPath -and $script:MsiFileCache.Contains($currentPath)) {
-                $pn = $script:MsiFileCache[$currentPath].ProductName
-                if ($pn -and $pn -ne "None") { $baseName = $pn -replace '\s+', '_' }
-            }
-            if (-not $baseName) { $baseName = [System.IO.Path]::GetFileNameWithoutExtension($currentPath) -replace '\s+', '_' }
-            $tmpPng = [System.IO.Path]::Combine($env:TEMP, "$baseName.png")
-            $resized.Save($tmpPng, [System.Drawing.Imaging.ImageFormat]::Png)
-            $resized.Dispose()
-            $files = [System.Collections.Specialized.StringCollection]::new()
-            [void]$files.Add($tmpPng)
-            [System.Windows.Forms.Clipboard]::SetFileDropList($files)
-            Write-Log "Icon copied to clipboard as 48x48 file : $tmpPng"
-        }
-        catch { Write-Log "Failed to copy icon as file : $_" -Level Warning }
-    })
-    $itemRaw = [System.Windows.Forms.ToolStripMenuItem]::new("Copy Raw Image")
-    $itemRaw.Tag = $originalBitmap
-    $itemRaw.Add_Click({
-        try {
-            [System.Windows.Forms.Clipboard]::SetImage($this.Tag)
-            Write-Log "Icon copied to clipboard as raw image ($($this.Tag.Width)x$($this.Tag.Height))"
-        }
-        catch { Write-Log "Failed to copy raw image : $_" -Level Warning }
-    })
-    [void]$menu.Items.Add($itemFile)
-    [void]$menu.Items.Add($itemRaw)
-    $menu.Show($this, [System.Drawing.Point]::new(0, $this.Height))
+    $iconContextMenu.Show($this, [System.Drawing.Point]::new(0, $this.Height))
 })
 $iconButton_Tab1.Add_MouseUp({
     param($s, $e)
@@ -4323,8 +4429,8 @@ foreach ($colName in @("Property", "Value")) {
 foreach ($colName in @("Name", "Default", "UI Title", "Description")) {
     $ch = New-Object System.Windows.Forms.ColumnHeader; $ch.Text = $colName; [void]$listView_Tab1Features.Columns.Add($ch)
 }
-$listView_Tab1Props.Add_ColumnClick({ HandleColumnClick -listViewparam $listView_Tab1Props -e $_ })
-$listView_Tab1Features.Add_ColumnClick({ HandleColumnClick -listViewparam $listView_Tab1Features -e $_ })
+$listView_Tab1Props.Add_ColumnClick({ Invoke-ColumnClick -listViewparam $listView_Tab1Props -e $_ })
+$listView_Tab1Features.Add_ColumnClick({ Invoke-ColumnClick -listViewparam $listView_Tab1Features -e $_ })
 
 # Context menus for listviews
 $contextMenu_Tab1Props = New-Object System.Windows.Forms.ContextMenuStrip
@@ -4380,8 +4486,8 @@ function Set-Tab1CentralLayout {
 function Show-Tab1ListView {
     param([int]$Index)
     $tabControl_Tab1Detail.SelectedIndex = $Index
-    if ($Index -eq 0) { AdjustListViewColumns -listView $listView_Tab1Props }
-    if ($Index -eq 2) { AdjustListViewColumns -listView $listView_Tab1Features }
+    if ($Index -eq 0) { Update-ListViewColumns -listView $listView_Tab1Props }
+    if ($Index -eq 2) { Update-ListViewColumns -listView $listView_Tab1Features }
     $currentPath = $null
     foreach ($ctrl in $msiSelectorFlowPanel.Controls) {
         $innerRadio = $ctrl.Controls | Where-Object { $_ -is [System.Windows.Forms.RadioButton] } | Select-Object -First 1
@@ -4505,7 +4611,7 @@ function Update-Tab1FromCache {
     $ReadMsiButton.Enabled   = $false
     Set-Tab1CentralLayout -ShowDetails $true
     foreach ($lv in @($listView_Tab1Props, $listView_Tab1Features)) {
-        if ($lv.Visible) { AdjustListViewColumns -listView $lv }
+        if ($lv.Visible) { Update-ListViewColumns -listView $lv }
     }
     $form.ResumeLayout()
     $form.Cursor = [System.Windows.Forms.Cursors]::Default
@@ -4711,8 +4817,8 @@ $tabControl_Tab1Detail.Add_Selecting({
 })
 $tabControl_Tab1Detail.Add_SelectedIndexChanged({
     $idx = $tabControl_Tab1Detail.SelectedIndex
-    if ($idx -eq 0) { AdjustListViewColumns -listView $listView_Tab1Props }
-    if ($idx -eq 2) { AdjustListViewColumns -listView $listView_Tab1Features }
+    if ($idx -eq 0) { Update-ListViewColumns -listView $listView_Tab1Props }
+    if ($idx -eq 2) { Update-ListViewColumns -listView $listView_Tab1Features }
     $currentPath = $null
     foreach ($ctrl in $msiSelectorFlowPanel.Controls) {
         $innerRadio = $ctrl.Controls | Where-Object { $_ -is [System.Windows.Forms.RadioButton] } | Select-Object -First 1
@@ -4754,7 +4860,7 @@ $launch_progressBar.Value = 25
 
 $splitContainer2 = gen $tabPage2 "SplitContainer" "" 0 0 0 0 'Dock=Fill' 'SplitterDistance=250' 'Orientation=Vertical' 'Panel1MinSize=100'
 $splitContainer2.FixedPanel = [System.Windows.Forms.FixedPanel]::None
-
+$splitContainer2.Add_SplitterMoved({ Update-ListViewColumns -listView $listView_Explore })
 
 # Panels for the left side
 $borderTop =          gen $tabPage2                "Panel"     ""                         0 0 0 1    'Dock=Top'    'BackColor=Gray' 
@@ -4797,7 +4903,7 @@ $recursionComboBox.Items.AddRange(@("No", "1", "2", "3", "4", "5", "All"))
 $recursionComboBox.SelectedIndex = 6  # default = All
 $sortComboBox.Items.AddRange(@("A-Z", "Z-A", "Old", "New"))
 $sortComboBox.SelectedIndex = 0
-$sortComboBox.Add_SelectedIndexChanged({ refreshTreeViewFolder })
+$sortComboBox.Add_SelectedIndexChanged({ Update-TreeViewFolder })
 
 
 $searchTextBox_Tab2.Add_KeyDown({
@@ -4874,7 +4980,7 @@ $treeView.Add_DrawNode({
     }else{ $e.DrawDefault=$true }
 })
 
-function FilterListViewItems {
+function Update-ListViewFilter {
     param(
         [System.Windows.Forms.ListView]$listView,     [string]$Mode, [bool]$showMsp = $false, [bool]$showMst = $false,
         [System.Collections.ArrayList]$registryPaths, [System.Collections.ArrayList]$allListViewItems
@@ -4919,8 +5025,8 @@ function FilterListViewItems {
     Update-ProgressBarWidth $Tab2_statusStrip $Tab2_statusLabel $Tab2_stopButton $Tab2_progressBar
 }
 
-$showMspCheckbox.Add_CheckedChanged({ FilterListViewItems -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore })
-$showMstCheckbox.Add_CheckedChanged({ FilterListViewItems -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore })
+$showMspCheckbox.Add_CheckedChanged({ Update-ListViewFilter -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore })
+$showMstCheckbox.Add_CheckedChanged({ Update-ListViewFilter -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore })
 
 $launch_progressBar.Value = 40
 
@@ -4965,7 +5071,7 @@ $rootNode.Expand()
 $launch_progressBar.Value = 45
 
 
-function SortDirectories {
+function Update-DirectoriesSorting {
     param ([System.IO.DirectoryInfo[]]$dirs, [string]$sortOption)
     if (-not $dirs -or $dirs.Count -eq 0) { return $dirs }
     switch ($sortOption) {
@@ -4977,7 +5083,7 @@ function SortDirectories {
     return $dirs
 }
 
-function PopulateTree {
+function Add-TreeviewDirectory {
     param ([System.Windows.Forms.TreeNode]$parentNode, [string]$path)
     try {
         # Handle network shares
@@ -5003,7 +5109,7 @@ function PopulateTree {
         $filteredDirs    = [System.Collections.Generic.List[System.IO.DirectoryInfo]]::new()
         foreach            ($dir in $dirs) { if (-not $excludedFolders.Contains($dir.Name)) { $filteredDirs.Add($dir) } }
         $dirs            = $filteredDirs.ToArray()
-        $dirs            = SortDirectories -dirs $dirs -sortOption $sortComboBox.Text
+        $dirs            = Update-DirectoriesSorting -dirs $dirs -sortOption $sortComboBox.Text
         $currentUserSid  = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
         $writeRight      = [System.Security.AccessControl.FileSystemRights]::Write
         # Batch add with BeginUpdate
@@ -5163,7 +5269,7 @@ function Expand-TreeViewPath {
                     try {
                         $dirInfo = [System.IO.DirectoryInfo]::new($currentNode.Tag)
                         $dirs    = $dirInfo.GetDirectories()
-                        $dirs    = SortDirectories -dirs $dirs -sortOption $sortComboBox.Text
+                        $dirs    = Update-DirectoriesSorting -dirs $dirs -sortOption $sortComboBox.Text
                         $treeView.BeginUpdate()
                         try {
                             $nodeBatch = [System.Collections.Generic.List[System.Windows.Forms.TreeNode]]::new()
@@ -5214,7 +5320,7 @@ function Expand-TreeViewPath {
             try {
                 $dirInfo = [System.IO.DirectoryInfo]::new($currentNode.Tag)
                 $dirs = $dirInfo.GetDirectories()
-                $dirs = SortDirectories -dirs $dirs -sortOption $sortComboBox.Text
+                $dirs = Update-DirectoriesSorting -dirs $dirs -sortOption $sortComboBox.Text
                 $treeView.BeginUpdate()
                 try {
                     $nodeBatch = [System.Collections.Generic.List[System.Windows.Forms.TreeNode]]::new()
@@ -5260,7 +5366,7 @@ function Expand-TreeViewPath {
 $launch_progressBar.Value = 50
 
 
-function OpenTreeViewSelectedFolder {
+function Open-TreeViewSelectedFolder {
     $selectedNode = $treeView.SelectedNode
     if ($null -ne $selectedNode) {
         if ($selectedNode.Text -eq "This Device" -or $selectedNode.Text -eq "Fast Access") {
@@ -5288,17 +5394,17 @@ function OpenTreeViewSelectedFolder {
 }
 
 
-$openBtn.Add_Click({ param($s, $e) ; OpenTreeViewSelectedFolder })
+$openBtn.Add_Click({ param($s, $e) ; Open-TreeViewSelectedFolder })
 
 
-function refreshTreeViewFolder {
+function Update-TreeViewFolder {
     $selectedNode = $treeView.SelectedNode
     if ($null -ne $selectedNode) {
         $scrollPosVert = [NativeMethods]::GetScrollPos($treeView.Handle, [NativeMethods]::SB_VERT)
         try {
             if (-not [string]::IsNullOrEmpty($selectedNode.Tag) -and $null -ne $selectedNode.Parent) {
                 $selectedNode.Nodes.Clear()
-                PopulateTree -parentNode $selectedNode -path $selectedNode.Tag
+                Add-TreeviewDirectory -parentNode $selectedNode -path $selectedNode.Tag
                 $selectedNode.Expand()
             } 
             else { [System.Windows.Forms.MessageBox]::Show("Cannot refresh because node is invalid.") }
@@ -5312,7 +5418,7 @@ function refreshTreeViewFolder {
 }
 
 
-$refreshBtn.Add_Click({ refreshTreeViewFolder })
+$refreshBtn.Add_Click({ Update-TreeViewFolder })
 
 
 $launch_progressBar.Value = 55
@@ -5398,7 +5504,7 @@ $treeView.Add_BeforeExpand({
         $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
         [System.Windows.Forms.Application]::DoEvents()
         $node.Nodes.Clear()
-        PopulateTree $node $node.Tag 
+        Add-TreeviewDirectory $node $node.Tag 
         $form.Cursor = [System.Windows.Forms.Cursors]::DefaultCursor 
     }
 })
@@ -5492,8 +5598,8 @@ function Complete-Listview {
             }
         }
     }
-    FilterListViewItems -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore
-    AdjustListViewColumns -listView $listView_Explore
+    Update-ListViewFilter -Mode Explore -listView $listView_Explore -showMsp $showMspCheckbox.Checked -showMst $showMstCheckbox.Checked -allListViewItems $allListViewItemsExplore
+    Update-ListViewColumns -listView $listView_Explore
     $Tab2_progressBar.Value  = 0
     $Tab2_stopButton.Enabled = $false
     $form.Cursor = [System.Windows.Forms.Cursors]::Default
@@ -5523,9 +5629,9 @@ Add-ListViewSearchFilter -SearchTextBox $searchTextBox_Tab2 -ListView $listView_
 
 $Tab2_stopButton.Add_Click({ $script:stopRequested = $true })
 
-$listView_Explore.Add_ColumnClick({ HandleColumnClick -listViewparam $listView_Explore -e $_ })
+$listView_Explore.Add_ColumnClick({ Invoke-ColumnClick -listViewparam $listView_Explore -e $_ })
 
-function ConfigureTreeViewContextMenu($treeView) {
+function Set-TreeViewContextMenu($treeView) {
     $treeView.Add_MouseDown({
         param($s, $e)
         if ($e.Button -eq [System.Windows.Forms.MouseButtons]::Right) {
@@ -5551,7 +5657,7 @@ function ConfigureTreeViewContextMenu($treeView) {
             [System.Windows.Forms.Clipboard]::SetText($txt)
         }
     })
-    [void](& $addItem "Open Folder" { OpenTreeViewSelectedFolder })
+    [void](& $addItem "Open Folder" { Open-TreeViewSelectedFolder })
     [void](& $addItem "Show in Explorer" {
         $tv   = $this.GetCurrentParent().Tag
         $node = $tv.SelectedNode
@@ -5562,7 +5668,7 @@ function ConfigureTreeViewContextMenu($treeView) {
                                                           [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Error) }
         }
     })
-    [void](& $addItem "Refresh Folder" { refreshTreeViewFolder })
+    [void](& $addItem "Refresh Folder" { Update-TreeViewFolder })
     [void](& $addItem "Scan Folder" {
         $tv = $this.GetCurrentParent().Tag
         if ($tv.SelectedNode -and ([System.IO.Directory]::Exists($tv.SelectedNode.Tag))) { Complete-Listview -multiSearch $false }
@@ -5635,7 +5741,7 @@ function ConfigureTreeViewContextMenu($treeView) {
         }
     }.GetNewClosure())
 }
-ConfigureTreeViewContextMenu -treeView $treeView
+Set-TreeViewContextMenu -treeView $treeView
 
 
 $launch_progressBar.Value = 70
@@ -5955,15 +6061,13 @@ Function PopulateRegistryListView {
         $hkuPaths = @($registryPaths | Where-Object { $_.StartsWith("HKU:") })
         if ($hkuPaths.Count -gt 0 -and $isRemote) {
             $connectionResult = $script:RemoteConnectionResults | Where-Object { $_.Computer -eq $computerName } | Select-Object -First 1
-            if ($connectionResult -and $connectionResult.ConsoleUserSID) {
+            if ($connectionResult) {
                 $loggedOnUserSID = $connectionResult.ConsoleUserSID
-                Write-Log "Using cached SID for $computerName : $loggedOnUserSID" -Level Debug
+                if ($loggedOnUserSID) { Write-Log "Using cached SID for $computerName : $loggedOnUserSID" -Level Debug }
+                else                  { Write-Log "No cached SID for $computerName, skipping HKU paths" -Level Debug }
             }
             else {
-                $userInfo = Get-RemoteConsoleUser -ComputerName $computerName -Credential $Credential
-                $loggedOnUserSID = $userInfo.SID
-                if ($loggedOnUserSID) { Write-Log "Found console user SID on $computerName : $loggedOnUserSID" -Level Debug }
-                else                  { Write-Log "No console user on $computerName, skipping HKU paths" -Level Debug }
+                Write-Log "No connection result for $computerName, skipping HKU paths" -Level Debug
             }
         }
         $collectionParams = @{
@@ -6179,7 +6283,7 @@ function Update-RegistryListViewFilter {
         -ShowInstallSource $checkbox_ShowInstallSource.Checked `
         -UseQuietUninstall $checkbox_QuietUninstallIfAvailable.Checked `
         -SourceData $filteredCache
-    AdjustListViewColumns -listView $listView_Registry
+    Update-ListViewColumns -listView $listView_Registry
 }
 
 function Invoke-RegeditShowButton {
@@ -6301,22 +6405,34 @@ $searchButton_Registry.Add_Click({
     Update-DeviceColumnVisibility -ListView $listView_Registry -ShowDevice ($targetComputers.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($targetComputers[0]))
     Update-InstallSourceColumnVisibility -ListView $listView_Registry -ShowInstallSource $showInstallSource
     if ($targetComputers.Count -gt 0 -and -not [string]::IsNullOrWhiteSpace($targetComputers[0])) {
-        $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
-        $searchButton_Registry.Enabled = $false
-        $searchButton_Registry.Text = "Testing..."
-        [System.Windows.Forms.Application]::DoEvents()
-        try {
-            $connectionResults = Test-RemoteConnections -Computers $targetComputers -Credential $credential
-            Update-ConnectionStatusDisplay -Results $connectionResults -Credential $credential
-            $connectedComputers = @($script:RemoteConnectionResults | Where-Object { $_.Success } | ForEach-Object { $_.Computer })
-            if ($connectedComputers.Count -eq 0) { return }
-            $targetComputers = $connectedComputers
+        # Reuse cached results if all requested computers already have a result
+        $needsTest = $false
+        foreach ($tc in $targetComputers) {
+            $cached = $script:RemoteConnectionResults | Where-Object { $_.Computer -eq $tc } | Select-Object -First 1
+            if (-not $cached) { $needsTest = $true; break }
         }
-        finally {
-            $form.Cursor = [System.Windows.Forms.Cursors]::Default
-            $searchButton_Registry.Enabled = $true
-            $searchButton_Registry.Text = "Search"
+        if ($needsTest) {
+            $form.Cursor = [System.Windows.Forms.Cursors]::WaitCursor
+            $searchButton_Registry.Enabled = $false
+            $searchButton_Registry.Text = "Testing..."
+            [System.Windows.Forms.Application]::DoEvents()
+            try {
+                $connectionResults = Test-RemoteConnections -Computers $targetComputers -Credential $credential
+                Update-ConnectionStatusDisplay -Results $connectionResults -Credential $credential
+            }
+            finally {
+                $form.Cursor = [System.Windows.Forms.Cursors]::Default
+                $searchButton_Registry.Enabled = $true
+                $searchButton_Registry.Text = "Search"
+            }
         }
+        $connectedComputers = @($script:RemoteConnectionResults | Where-Object { $_.Success } | ForEach-Object { $_.Computer })
+        $connectedComputers = @($connectedComputers | Where-Object { $_ -in $targetComputers })
+        if ($connectedComputers.Count -eq 0) {
+            Write-Log "No connected computers available for registry search" -Level Warning
+            return
+        }
+        $targetComputers = $connectedComputers
     }
     PopulateRegistryListView -listViewparam $listView_Registry -registryPaths $selectedPaths -allListViewItems $allListViewItems_Registry -FilterText $filterText -RestrictToFilter $restrictToFilter -UseQuietUninstall $useQuietUninstall -ShowInstallSource $showInstallSource -TargetComputers $targetComputers -Credential $credential
 })
@@ -9314,6 +9430,16 @@ function Update-CompareTab {
         [System.Windows.Forms.MessageBox]::Show("A background operation is already running.", "Operation In Progress", [System.Windows.Forms.MessageBoxButtons]::OK, [System.Windows.Forms.MessageBoxIcon]::Warning)
         return
     }
+    # Skip comparison when cache is empty
+    $totalCachedProducts = 0
+    foreach ($compKey in $script:ProductCache.Keys) { $totalCachedProducts += $script:ProductCache[$compKey].Count }
+    if ($totalCachedProducts -eq 0) {
+        $treeViewCompare.Nodes.Clear()
+        $detailsRichTextBoxCompare.Clear()
+        $Tab4_statusLabel.Text = "No products in cache to compare"
+        $cleanButton_MSICleanupTab.Enabled = $false
+        return
+    }
     $treeViewCompare.Nodes.Clear()
     $detailsRichTextBoxCompare.Clear()
     $script:CurrentProductNodesCompare = @{}
@@ -11541,7 +11667,7 @@ function Show-NonBlockingMessage {
     $successForm.Show()
 }
 
-function ListExport {
+function Invoke-Export {
     param(
         [Parameter(Mandatory=$false)]
         [System.Windows.Forms.ListView]$listView,
@@ -11855,8 +11981,8 @@ function Export-ToXlsx {
 
 $launch_progressBar.Value = 90
 
-ConfigureListViewContextMenu -listView $listView_Explore
-ConfigureListViewContextMenu -listView $listView_Registry
+Set-ListViewContextMenu -listView $listView_Explore
+Set-ListViewContextMenu -listView $listView_Registry
 
 $form.add_OnWindowMessage({
     param($s, $m)
@@ -11866,7 +11992,7 @@ $form.add_OnWindowMessage({
         $currentWidth = $listView.ClientSize.Width
         if (-not $script:lastWidth[$listView] -or $script:lastWidth[$listView] -ne $currentWidth) {
             $script:lastWidth[$listView] = $currentWidth
-            AdjustListViewColumns -listView $listView
+            Update-ListViewColumns -listView $listView
         }
     }
     # Batch layout refresh for all visible ListViews and uninstall panels
@@ -11891,24 +12017,9 @@ $form.add_OnWindowMessage({
             return
         }
         # WM_ENTERSIZEMOVE : user started resizing or moving the window
-        0x231  {
-            $script:resizePending = $true
-            # Suspend redraw on the right panel to prevent flickering during drag-resize
-            if ($rightPanel_Tab1.IsHandleCreated) { [NativeMethods]::SendMessage($rightPanel_Tab1.Handle, 0x000B, 0, 0) }
-        }
+        0x231  { }
         # WM_EXITSIZEMOVE : user finished resizing or moving the window
-        0x232  {
-            if ($script:resizePending) {
-                $script:resizePending = $false
-                # Re-enable redraw and force a full repaint of the right panel
-                if ($rightPanel_Tab1.IsHandleCreated) {
-                    [NativeMethods]::SendMessage($rightPanel_Tab1.Handle, 0x000B, 1, 0)
-                    $rightPanel_Tab1.Invalidate($true)
-                    $rightPanel_Tab1.Update()
-                }
-                & $processAction
-            }
-        }
+        0x232  { & $processAction }
         # WM_SIZE : window size changed (maximize, restore, programmatic resize)
         0x0005 { if (-not $script:resizePending) { & $processAction } }
     }
@@ -11939,8 +12050,8 @@ $tabControl.Add_SelectedIndexChanged({
     }
     Update-RemoteTargetPanelVisibility
     $splitContainerSearch_MSICleanupTab.SplitterDistance = [int]($splitContainerSearch_MSICleanupTab.Width * 0.6)
-    if ($tabControl.SelectedTab -eq $tabPage2) { AdjustListViewColumns -listView $listView_Explore }
-    if ($tabControl.SelectedTab -eq $tabPage3) { AdjustListViewColumns -listView $listView_Registry }
+    if ($tabControl.SelectedTab -eq $tabPage2) { Update-ListViewColumns -listView $listView_Explore }
+    if ($tabControl.SelectedTab -eq $tabPage3) { Update-ListViewColumns -listView $listView_Registry }
     if ($tabControl.SelectedTab -eq $tabPage4) { 
         $collapseAllButton_MSICleanupTab.bringtoFront()
         $expandAllButton_MSICleanupTab.bringtoFront()
@@ -11956,6 +12067,7 @@ $form.Add_Load({
 })
 
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
+
 
 $form.Add_Shown({
     Update-RemoteTargetPanelVisibility
@@ -11985,24 +12097,17 @@ function Invoke-ApplicationCleanup {
     try   { Remove-ScheduledTrustedHosts }
     catch { Write-Log "Error cleaning TrustedHosts : $_"    -Level Error }
     try {
-        foreach ($target in $script:SmbSessionsToCleanup) {
-            $smbResult  = [NetSession.Native]::DisconnectSmb($target)
-            $credResult = [NetSession.Native]::DeleteDomainCredential($target)
-            Write-Log "Session cleanup for $target : smb=$smbResult, cred=$credResult"
+        foreach ($entry in $script:SmbSessionsToCleanup) {
+            $computer   = $entry.Computer
+            $smbResult  = if ($entry.CleanSmb)  { [NetSession.Native]::DisconnectSmb($computer) }          else { "skipped (pre-existing)" }
+            $credResult = if ($entry.CleanCred) { [NetSession.Native]::DeleteDomainCredential($computer) } else { "skipped (pre-existing)" }
+            Write-Log "Session cleanup for $computer : smb=$smbResult, cred=$credResult"
         }
         $script:SmbSessionsToCleanup.Clear()
     }
     catch { Write-Log "Error cleaning sessions : $_" -Level Error }
     try   { if ($script:SecurePassword) { $script:SecurePassword.Dispose() } }
     catch { Write-Log "Error disposing SecurePassword : $_" -Level Error }
-    try {
-        if ($script:WindowsInstallerCOM) {
-            [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($script:WindowsInstallerCOM)
-            $script:WindowsInstallerCOM = $null
-            Write-Log "WindowsInstaller COM object released"
-        }
-    }
-    catch { Write-Log "Error releasing WindowsInstaller COM : $_" -Level Error }
     # ── Remove TaskBar shortcut if user did not actually pin the app ──
     $taskbarLnk = [System.IO.Path]::Combine($script:TaskbarPinDir, $script:LnkName)
     $taskbarPinExists = [System.IO.File]::Exists($taskbarLnk)
@@ -12070,4 +12175,3 @@ $form.Add_FormClosed({
 $form.ResumeLayout()
 [System.Windows.Forms.Application]::Run($form)
 Write-Log "MSI Tools ended"
-
