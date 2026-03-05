@@ -1,6 +1,6 @@
 # MSI Tools — Technical Documentation
 
-> **Version** : 1.1  
+> **Version** : 1.2 
 > **Author** : Léo Gillet — Freenitial  
 > **Requirements** : PowerShell 5.1+ / .NET Framework 4.5+  
 > **Privbiliges** : Works without admin rights — but recommended for network and cleanup
@@ -585,10 +585,8 @@ A confirmation is prompted if uninstall jobs are still in progress.
 | Limitation | Detail |
 |---|---|
 | **PowerShell 5.1** | Not tested with PowerShell 7+ (COM classes and WinForms may behave differently) |
-| **x64 only** | The script redirects to `Sysnative` if launched in x86, but the UI is designed for x64 |
 | **No code signing** | Requires `-ExecutionPolicy Bypass` |
-| **Regedit automation** | Depends on the UI structure of regedit (fragile between Windows versions).
-| **RemoteRegistry** | Required for certain Tab 4 Cleanup operations. The tool can start it but cannot configure it if the service is disabled by GPO |
-| **Console user detection** | Uses WTS API then WMI as fallback. Does not work if no user is logged in to the console |
+| **RemoteRegistry** | Required for all remote registry operations |
 | **Parent-child detection** | Based on the Dependencies registry. May miss relationships if the installer does not use this standard mechanism (e.g., C++ redistributables) |
 | **Force ACL** | May fail on keys protected by TrustedInstaller (would require a specific token) |
+
