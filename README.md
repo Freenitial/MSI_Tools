@@ -1,4 +1,4 @@
-# **MSI Tools**
+#  <img width="128" height="128" alt="Untitled 1ss" src="https://github.com/user-attachments/assets/8ba8a4c0-966d-4427-96b6-8e25783aabde" />  **MSI Tools**
 
 **Graphical PowerShell tool for MSI diagnostics, registry exploration, remote analysis, and residue cleanup**
 
