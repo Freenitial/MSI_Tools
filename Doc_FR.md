@@ -585,10 +585,7 @@ Une confirmation est demandée si des jobs de désinstallation sont encore en co
 | Limitation | Détail |
 |---|---|
 | **PowerShell 5.1** | Pas testé avec PowerShell 7+ (les classes COM et WinForms peuvent se comporter différemment) |
-| **x64 uniquement** | Le script redirige vers `Sysnative` si lancé en x86, mais l'UI est conçue pour x64 |
 | **Pas de signature de code** | Nécessite `-ExecutionPolicy Bypass` |
-| **Regedit automation** | Dépend de la structure UI de regedit (fragile entre versions de Windows).
-| **RemoteRegistry** | Nécessaire pour certaines opérations Tab 4 Cleanup. L'outil peut le démarrer mais ne peut pas le configurer si le service est désactivé par GPO |
-| **Détection utilisateur console** | Utilise WTS API puis WMI en fallback. Ne fonctionne pas si aucun utilisateur n'est connecté en console |
+| **RemoteRegistry** | Nécessaire toutes les opérations de registre à distance |
 | **Détection parent-enfant** | Basée sur les Dependencies registry. Peut manquer des relations si l'installeur n'utilise pas ce mécanisme standard (exemple : redist c++)|
 | **Force ACL** | Peut échouer sur des clés protégées par TrustedInstaller (nécessiterait un token spécifique) |
