@@ -1,6 +1,6 @@
 # MSI Tools — Documentation Technique
 
-> **Version** : 1.1  
+> **Version** : 1.2 
 > **Auteur** : Léo Gillet — Freenitial  
 > **Runtime** : PowerShell 5.1+ / .NET Framework 4.5+  
 > **Privilèges** : Fonctionne sans droits admin — Droits admin recommandés pour les fonctionnalités réseau et nettoyage
