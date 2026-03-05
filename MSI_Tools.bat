@@ -2,7 +2,7 @@
     @echo off & Title MSI Tools
     if exist %SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe   set "powershell=%SystemRoot%\system32\WindowsPowerShell\v1.0\powershell.exe"
     if exist %SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe  set "powershell=%SystemRoot%\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
-    %powershell% -noexit -NoLogo -NoProfile -Ex Bypass -Window normal -Command "$batFile='%~f0';$sb=[ScriptBlock]::Create([IO.File]::ReadAllText('%~f0'));&$sb"
+    %powershell% -NoLogo -NoProfile -Ex Bypass -Window Hidden -Command "$batFile='%~f0';$sb=[ScriptBlock]::Create([IO.File]::ReadAllText('%~f0'));&$sb"
     exit /b
 #>
 
@@ -12175,3 +12175,4 @@ $form.Add_FormClosed({
 $form.ResumeLayout()
 [System.Windows.Forms.Application]::Run($form)
 Write-Log "MSI Tools ended"
+
