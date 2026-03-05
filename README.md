@@ -6,7 +6,7 @@
 
 ### Features ✨
 
-- 📦 MSI file properties analysis
+- 📦 MSI file properties analysis + Auto-detect possible arguments
 - 🔍 Fast file detection and GUID finder
 - 📂 File system explorer
 - ⚙️ Customizable recursion level for MSI scan
